@@ -173,7 +173,7 @@ fn step_simulation(
     if !game_res.paused {
         // AI tracking for player 2 paddle
         if game_res.ai_enabled && game_res.game.in_play {
-            let (_, cy) = game_res.game.find_soliton_centroid();
+            let cy = game_res.game.ball_y;
             let p2_center = game_res.game.p2_paddle_y as f32 + game_res.game.paddle_height as f32 / 2.0;
             if cy < p2_center - 1.5 {
                 game_res.game.move_p2(-2);
@@ -202,16 +202,17 @@ fn update_ui(
 ) {
     for mut text in &mut score_query {
         text.0 = format!(
-            "PLAYER 1: {:02}   |   DZOGLANG SOLITON FIELD   |   PLAYER 2: {:02}",
-            game_res.game.p1_score, game_res.game.p2_score
+            "PLAYER 1: {:02}   |   RALLY: {:02}   |   PLAYER 2: {:02}",
+            game_res.game.p1_score, game_res.game.rally_count, game_res.game.p2_score
         );
     }
 
     for mut text in &mut status_query {
         let ai_str = if game_res.ai_enabled { "ON" } else { "OFF" };
         let pause_str = if game_res.paused { " [PAUSED]" } else { "" };
+        let serve_hint = if !game_res.game.in_play { " [PRESS SPACE TO SERVE]" } else { "" };
         text.0 = format!(
-            "[W/S] P1 | [Up/Dn] P2 | [A] AI: {ai_str} | [Space] Serve | [P] Pause{pause_str}"
+            "[W/S] P1  |  [Up/Dn] P2  |  [A] AI: {ai_str}  |  [Space] Serve  |  [P] Pause{pause_str}{serve_hint}"
         );
     }
 }
