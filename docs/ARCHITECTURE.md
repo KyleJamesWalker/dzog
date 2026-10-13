@@ -1,6 +1,6 @@
-# Dzoglang Runtime Engine: Field-First Architecture & Bevy GUI
+# Dzog Runtime Engine: Field-First Architecture & Bevy GUI
 
-This document details the field-first architecture of the **Dzoglang** runtime engine, adherence to its philosophical principles ([`philosophy.md`](../philosophy.md)), the **Nonlinear Solitary Wave Mechanics** replacing classical rigid bodies, and the **Bevy 0.15 GUI & Pixel Presentation** in [`/pong`](../pong/).
+This document details the field-first architecture of the **Dzog** runtime engine, adherence to its philosophical principles ([`philosophy.md`](../philosophy.md)), the **Nonlinear Solitary Wave Mechanics** replacing classical rigid bodies, and the **Bevy 0.15 GUI & Pixel Presentation** in [`/pong`](../pong/).
 
 ---
 
@@ -10,7 +10,7 @@ Lines 160–163 of [`philosophy.md`](../philosophy.md) declare:
 
 > *"Objects may later be recognized as persistent patterns of activity. The first linear wave model does not produce autonomous agents, solid bodies, or stable solitons. Emergence is a property to demonstrate, not an implementation shortcut."*
 
-Introducing classical rigid-body mechanics (`Body2D`, bounding boxes, continuous collision sweep queries) would subvert Dzoglang by treating objects as primary entities and demoting the field to a cosmetic effect.
+Introducing classical rigid-body mechanics (`Body2D`, bounding boxes, continuous collision sweep queries) would subvert Dzog by treating objects as primary entities and demoting the field to a cosmetic effect.
 
 ### The Problem with Pure Linear Waves
 In linear acoustics ($\partial^2 p / \partial t^2 = c^2 \nabla^2 p$), wave packets undergo radial cylindrical dispersion ($1/\sqrt{r}$ decay). Without a focusing mechanism, a linear pulse spreads into diffuse background ripples rather than maintaining a trackable, coherent form for 2D gameplay.

@@ -29,7 +29,7 @@ impl GpuContext {
         let (device, queue) = adapter
             .request_device(
                 &DeviceDescriptor {
-                    label: Some("Dzoglang Headless Device"),
+                    label: Some("Dzog Headless Device"),
                     required_features: Features::empty(),
                     required_limits: Limits::default(),
                     memory_hints: MemoryHints::default(),

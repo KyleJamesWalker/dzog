@@ -1,23 +1,25 @@
-# Dzoglang
+# Dzog
 
 **A continuous field-mechanics runtime for relation-first computing.**
 
-Conventional runtimes decompose reality into isolated object graphs, discrete state machines, and imperative instruction narratives. **Dzoglang** replaces object-centric execution with a spatially continuous lattice governed by partial differential equations (PDEs), nonlinear solitary wave dynamics, and Bohm-Hiley active-information guidance.
+Conventional runtimes decompose reality into isolated object graphs, discrete state machines, and imperative instruction narratives. **Dzog** replaces object-centric execution with a spatially continuous lattice governed by partial differential equations (PDEs), nonlinear solitary wave dynamics, and Bohm-Hiley active-information guidance.
 
-In Dzoglang, a program is not a sequence of instructions attached to objects—it is an **executable situation**: a Hamiltonian landscape of constitutive laws, heterogeneous material fields, boundary commitments, and excitations. Persistent entities (solitons, waveguides, structural bodies) emerge from local field relations, interfere across space, and exchange momentum without scene graphs or collision hierarchies.
+In Dzog, a program is not a sequence of instructions attached to objects—it is an **executable situation**: a Hamiltonian landscape of constitutive laws, heterogeneous material fields, boundary commitments, and excitations. Persistent entities (solitons, waveguides, structural bodies) emerge from local field relations, interfere across space, and exchange momentum without scene graphs or collision hierarchies.
 
 Read [philosophy.md](./philosophy.md) for the theoretical foundations (Bohm-Hiley active information, Hillman's situated image, and living actor ecologies) and [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) for the runtime architecture.
+
+![Field-First Crystalline Asteroids & Alien Ecology Demo](./docs/asteroids_demo.png)
 
 ---
 
 ## Theoretical Foundation: Field Mechanics as Computation
 
-Dzoglang operationalizes concepts from quantum field theory, nonlinear wave mechanics, and Bohmian pilot-wave dynamics into a deterministic GPU/CPU lattice runtime:
+Dzog operationalizes concepts from quantum field theory, nonlinear wave mechanics, and Bohmian pilot-wave dynamics into a deterministic GPU/CPU lattice runtime:
 
 1. **Constitutive Field Laws over Object Scripts**:
    Every cell evolves under a unified staggered finite-difference time-domain (FDTD) operator. Behavior is authored by shaping material density $\rho(\mathbf{x})$, bulk modulus $K(\mathbf{x})$, dissipation $\gamma(\mathbf{x})$, and structural cohesion $C(\mathbf{x}) \in [0, 1]$.
 2. **Nonlinear Solitary Cohesion (Solitons)**:
-   Linear waves disperse radially ($1/\sqrt{r}$). Dzoglang introduces a saturating nonlinear self-focusing potential that balances numerical dispersion, allowing localized excitations to persist and rebound as coherent quasi-particles without rigid-body wrappers.
+   Linear waves disperse radially ($1/\sqrt{r}$). Dzog introduces a saturating nonlinear self-focusing potential that balances numerical dispersion, allowing localized excitations to persist and rebound as coherent quasi-particles without rigid-body wrappers.
 3. **Bohm-Hiley Quantum Potential & Active Information**:
    Following Bohm and Hiley's second-order formulation, the runtime computes the quantum potential $Q(\mathbf{x}) = -\nabla^2 R(\mathbf{x}) / R(\mathbf{x})$ from the regularized field envelope $R(\mathbf{x}) = \sqrt{p(\mathbf{x})^2 + \epsilon^2}$. Because $Q$ depends on *spatial curvature* (form) rather than raw amplitude, standing-wave channels and interference ridges exert an organizing guidance force $\mathbf{F}_Q = -\nabla Q$ on trajectories.
 4. **Continuous Phase Transitions & Structural Erosion**:
@@ -57,9 +59,10 @@ $$f_{\text{nl}}(p) = \frac{\beta \, p}{1 + \alpha \, p^2} - \kappa \, p, \qquad 
 
 | Crate | Responsibility |
 | --- | --- |
-| `crates/dzog-core` | Reference Yee-staggered FDTD solver, nonlinear soliton law, Bohmian quantum potential $Q(\mathbf{x})$, vorticity $\nabla \times \mathbf{v}$, heterogeneous material & cohesion fields, moving boundary conditions, Hamiltonian energy accounting, pressure probes, offline WAV synthesis, and RON `FieldSpec` / `Checkpoint` serialization. |
-| `crates/dzog-wgpu` | GPU-native compute pipeline (`velocity.wgsl`, `pressure.wgsl`, `impulse.wgsl`, `render.wgsl`) over ping-pong `RGBA32Float` state textures, material/boundary textures, GPU-side Bohmian potential $Q$ evaluation, zero-readback GPU impulse injection, and verified CPU/GPU agreement ($< 10^{-4}$). |
-| `crates/dzog-app` | Standalone `winit` + `wgpu` interactive lattice instrument for real-time GPU wave excitation and boundary inspection. |
+| `crates/dzog-core` | Reference Yee-staggered FDTD solver, nonlinear soliton law, Bohmian quantum potential $Q(\mathbf{x})$, Poisson gravitational potential $\Phi_g(\mathbf{x})$, free-rotating `CohesiveBody` rasterization & BFS topological cleaving, reaction thruster plumes, antiphase interference shields, binaural Doppler cockpit sonification (`FieldModalSynthesizer`), Hamiltonian energy accounting, and RON `FieldSpec` / `Checkpoint` serialization. |
+| `crates/dzog-wgpu` | GPU-native compute pipeline (`velocity.wgsl`, `pressure.wgsl`, `impulse.wgsl`, `reduce_body.wgsl`) over ping-pong `RGBA32Float` state textures, periodic toroidal wrapping, zero-readback GPU body force/torque/probe reduction, and verified CPU/GPU agreement ($< 10^{-4}$). |
+| `crates/dzog-bevy` | Bevy 0.15 engine integration plugin (`DzogBevyPlugin`): nearest-neighbor field canvas rendering (`FieldImageHandle`), shared perceptual view modes (`FieldViewMode`), WGPU compute accelerator (`GpuFieldAccelerator`), and native `bevy_audio` (`Decodable` / `DzogFieldAudioSource`) streaming. |
+| `asteroids` | **Field-First Crystalline Asteroids & Alien Ecology**: Bevy 0.15 + WGPU compute demonstration of free-rotating mineralogical asteroids (`PiezoQuartz`, `ObsidianAnvil`, `BismuthCrystal`), connected-component topological cleaving, Bohmian-guided alien saucers & harmonic weavers, reaction thruster backblast, antiphase wave-interference shields, toroidal/gravity-well arenas, and binaural cockpit Doppler sonification. |
 | `pong` | **Solid-State & Quantum-Vacuum Breakout**: Bevy 0.15 + WGPU compute demonstration of solid-state crystalline phonon coupling, point-of-impact cleavage planes, sympathetic crystal cascades, Paddle Doppler Overcharge, coherent Phase-Pulse wave-casting, and counterfactual checkpoint branching. |
 
 ### GPU Compute Pipeline (`dzog-wgpu`)
@@ -88,24 +91,27 @@ Rust scheduler -> WGPU compute substeps (Pass 1: Velocity + Bohmian Q, Pass 2: P
 ## Running the Runtime & Demos
 
 ```bash
-# Run the full verification suite (25 unit, analytical gate, GPU/CPU agreement, and physics tests)
+# Run the full verification suite (33 unit, analytical gate, GPU/CPU agreement, and physics tests)
 cargo test --workspace
+
+# Launch the Field-First Crystalline Asteroids & Alien Ecology demo (Bevy 0.15 GUI)
+cargo run -p asteroids
+
+# Run the headless Asteroids WGPU zero-readback reduction + topological cleaving benchmark
+cargo run -p asteroids -- --bench
 
 # Launch the Solid-State & Quantum-Vacuum Breakout demo (Bevy 0.15 GUI)
 cargo run -p pong
 
 # Run the headless WGPU compute + CPU FDTD solver & rasterizer benchmark
 cargo run -p pong -- --bench
-
-# Launch the native WGPU compute field instrument
-cargo run -p dzog-app
 ```
 
 ---
 
 ## Artifacts: Image As Program
 
-A screenshot or color bitmap is not a program. Dzoglang distinguishes three serializable artifacts (`dzog-core::manifest`):
+A screenshot or color bitmap is not a program. Dzog distinguishes three serializable artifacts (`dzog-core::manifest`):
 
 - **Specification (`FieldSpec`)**: Authored constitutive laws, grid scale, material bounds, boundary conventions, and probe topologies.
 - **Checkpoint (`Checkpoint`)**: A complete, bit-reproducible snapshot of all staggered dynamic fields ($p^n, \mathbf{v}^{n-1/2}$), material/cohesion layers, and step clocks at an integer step boundary.
@@ -115,7 +121,7 @@ A screenshot or color bitmap is not a program. Dzoglang distinguishes three seri
 
 ## Platform Roadmap: Toward a General 2D Field-Physics Game Engine
 
-Rather than duplicating generic ECS, windowing, or UI layers already provided by host frameworks like Bevy, Dzoglang focuses strictly on the **core GPU field solver, wave-matter physics, and shader presentation pipeline** required to power genres such as **2D Shmups**, **Asteroids**, and **Star Control** arena/exploration games:
+Rather than duplicating generic ECS, windowing, or UI layers already provided by host frameworks like Bevy, Dzog focuses strictly on the **core GPU field solver, wave-matter physics, and shader presentation pipeline** required to power genres such as **2D Shmups**, **Asteroids**, and **Star Control** arena/exploration games:
 
 1. **Free-Rotating Cohesive Bodies & Topological Cleaving (*Asteroids* / Destructible Hulls)**:
    - Generalize axis-aligned boundary masks into a GPU **rotating local-grid body rasterizer** with full linear and angular momentum $(\mathbf{P}, L_z)$.
@@ -151,5 +157,12 @@ Rather than duplicating generic ECS, windowing, or UI layers already provided by
 
 - [Philosophy](./philosophy.md): Conceptual synthesis (Hillman, Bohm-Hiley, Dzogchen) and testable hypotheses.
 - [Architecture](./docs/ARCHITECTURE.md): Nonlinear solitary field equations and runtime pipeline details.
+- [Audio Overview](./docs/overview_audio.md): Field-grounded modal sonification, silent quantum vacuum gating, and `bevy_audio` (`Decodable`) integration.
 - B. J. Hiley, [*Process, Distinction, Groupoids and Clifford Algebras*](https://arxiv.org/abs/1211.2107).
 - [Stanford Encyclopedia of Philosophy: Bohmian Mechanics](https://plato.stanford.edu/entries/qm-bohm/).
+
+---
+
+## License
+
+Permissive **MIT Attribution License** — see [`LICENSE`](./LICENSE). Forks and redistributions must preserve original author credit (`J. Dunlap / jadbox`).

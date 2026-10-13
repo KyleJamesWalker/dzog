@@ -1,4 +1,4 @@
-//! Dzoglang Field-First Crystalline Asteroids & Alien Ecology Demo & Benchmark.
+//! Dzog Field-First Crystalline Asteroids & Alien Ecology Demo & Benchmark.
 
 pub mod field_game;
 pub mod gui;
@@ -15,12 +15,12 @@ fn main() {
         return;
     }
 
-    println!("Launching Dzoglang Field-First Crystalline Asteroids & Alien Ecology GUI...");
+    println!("Launching Dzog Field-First Crystalline Asteroids & Alien Ecology GUI...");
     gui::launch_gui();
 }
 
 fn run_headless_benchmark() {
-    println!("=== Dzoglang Field-First Crystalline Asteroids & Alien Ecology Benchmark ===");
+    println!("=== Dzog Field-First Crystalline Asteroids & Alien Ecology Benchmark ===");
     let mut game = AsteroidsFieldGame::new(144, 96);
 
     if let Ok(ctx) = pollster::block_on(GpuContext::init_headless()) {

@@ -1,6 +1,6 @@
 //! Spatially staggered 2D finite-difference grid layout.
 //!
-//! Following Dzoglang's acoustic discretization:
+//! Following Dzog's acoustic discretization:
 //! - Center: cell center (i + 0.5, j + 0.5) stores scalar pressure p, density rho, bulk modulus K, damping gamma.
 //! - East face: vertical face between (i, j) and (i + 1, j) stores horizontal velocity vx.
 //! - North face: horizontal face between (i, j) and (i, j + 1) stores vertical velocity vy.

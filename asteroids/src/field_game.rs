@@ -1,4 +1,4 @@
-//! Field-First Crystalline Asteroids & Alien Ecology on the Dzoglang Lattice.
+//! Field-First Crystalline Asteroids & Alien Ecology on the Dzog Lattice.
 //!
 //! Demonstrates all five roadmap capabilities from `readme.md` and `philosophy.md`:
 //! 1. Free-Rotating Cohesive Bodies & Topological Cleaving (`CohesiveBody`, BFS fracture splitting,
@@ -10,48 +10,9 @@
 //! 5. Live Binaural Cockpit Field Sonification (`BinauralCockpitSonifier` with Doppler telemetry).
 
 use std::f32::consts::{FRAC_PI_2, PI, TAU};
+pub use dzog_bevy::{FieldViewMode, GpuFieldAccelerator};
 use dzog_core::*;
-use dzog_wgpu::{GpuBodyQuery, GpuContext, GpuSimulation};
-
-/// Hardware WGPU compute accelerator for the Asteroids lattice.
-pub struct GpuFieldAccelerator {
-    pub ctx: GpuContext,
-    pub sim: GpuSimulation,
-}
-
-/// Perceptual inspection view mode (`philosophy.md` §Multiple Perceptual Views).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FieldViewMode {
-    /// Default arcade view: rotating mineral crystals, glowing cleavage veins, thruster wakes, and saucer lock rings.
-    CompositeArcade,
-    /// Scalar pressure p(x,y) and Bohmian Quantum Potential Q(x,y) guidance ridges.
-    PressureAndBohmian,
-    /// Particle velocity |v|, Poynting flux p*v, and gravitational potential Phi_g.
-    VelocityAndFlux,
-    /// Material acoustic impedance Z(x,y) = sqrt(rho * K) and structural cohesion C(x,y).
-    ImpedanceAndCohesion,
-}
-
-#[allow(dead_code)]
-impl FieldViewMode {
-    pub fn next(self) -> Self {
-        match self {
-            Self::CompositeArcade => Self::PressureAndBohmian,
-            Self::PressureAndBohmian => Self::VelocityAndFlux,
-            Self::VelocityAndFlux => Self::ImpedanceAndCohesion,
-            Self::ImpedanceAndCohesion => Self::CompositeArcade,
-        }
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::CompositeArcade => "Composite Ecology",
-            Self::PressureAndBohmian => "Pressure p & Bohmian Q",
-            Self::VelocityAndFlux => "Velocity v, Flux & Gravity",
-            Self::ImpedanceAndCohesion => "Impedance Z & Cohesion C",
-        }
-    }
-}
+use dzog_wgpu::GpuBodyQuery;
 
 /// World lattice topology mode (`[M]`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -309,19 +270,13 @@ impl AsteroidsFieldGame {
         if self.gpu_accel.is_some() {
             return true;
         }
-        if let Ok(ctx) = pollster::block_on(GpuContext::init_headless()) {
-            if let Ok(sim) = GpuSimulation::new(
-                &ctx,
-                &self.solver.state,
-                &self.solver.material,
-                &self.solver.boundary,
-                &self.solver.config,
-            ) {
-                self.gpu_accel = Some(GpuFieldAccelerator { ctx, sim });
-                return true;
-            }
-        }
-        false
+        self.gpu_accel = GpuFieldAccelerator::try_new(
+            &self.solver.state,
+            &self.solver.material,
+            &self.solver.boundary,
+            &self.solver.config,
+        );
+        self.gpu_accel.is_some()
     }
 
     pub fn toggle_gpu_acceleration(&mut self) -> bool {

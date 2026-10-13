@@ -1,6 +1,6 @@
 //! Field-First Solid-State & Quantum-Vacuum Breakout on the Dzog lattice.
 //!
-//! Demonstrates Dzoglang's core philosophy (`philosophy.md` & `readme.md`):
+//! Demonstrates Dzog's core philosophy (`philosophy.md` & `readme.md`):
 //! - Clean Quantum Vacuum: Empty space is a non-viscous vacuum (high sub-threshold decay, zero pond sloshing).
 //!   The ball travels on crisp, high-precision ballistic trajectories unless crossing a high-energy shock front.
 //! - Solid-State Crystalline Bricks:
@@ -20,48 +20,8 @@
 //!     soliton from the paddle to cleave cracked bricks from afar.
 
 use std::f32::consts::FRAC_PI_2;
+pub use dzog_bevy::{FieldViewMode, GpuFieldAccelerator};
 use dzog_core::*;
-use dzog_wgpu::{GpuContext, GpuSimulation};
-
-/// Hardware WGPU compute accelerator for the Breakout lattice.
-pub struct GpuFieldAccelerator {
-    pub ctx: GpuContext,
-    pub sim: GpuSimulation,
-}
-
-/// Perceptual inspection view mode (`philosophy.md` §Multiple Views).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FieldViewMode {
-    /// Default arcade view: crisp vacuum, solid-state crystal cleavage veins, and shockwave rings.
-    CompositeArcade,
-    /// Scalar pressure p(x,y) and Bohmian Quantum Potential Q(x,y) guidance ridges.
-    PressureAndBohmian,
-    /// Particle velocity |v| and instantaneous acoustic energy flux (Poynting vector p*v).
-    VelocityAndFlux,
-    /// Material acoustic impedance Z(x,y) = sqrt(rho * K) and structural cohesion C(x,y).
-    ImpedanceAndCohesion,
-}
-
-#[allow(dead_code)]
-impl FieldViewMode {
-    pub fn next(self) -> Self {
-        match self {
-            Self::CompositeArcade => Self::PressureAndBohmian,
-            Self::PressureAndBohmian => Self::VelocityAndFlux,
-            Self::VelocityAndFlux => Self::ImpedanceAndCohesion,
-            Self::ImpedanceAndCohesion => Self::CompositeArcade,
-        }
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::CompositeArcade => "Solid-State + Vacuum",
-            Self::PressureAndBohmian => "Pressure p & Bohmian Q",
-            Self::VelocityAndFlux => "Velocity v & Energy Flux",
-            Self::ImpedanceAndCohesion => "Impedance Z & Cohesion C",
-        }
-    }
-}
 
 /// Solid-state crystalline material properties per brick row (all c >= 1.0, zero fluid/sponge behavior).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -308,6 +268,8 @@ pub struct BreakoutFieldGame {
     pub field_energy: FieldEnergy,
     pub saved_branch: Option<GameBranchSnapshot>,
     pub gpu_accel: Option<GpuFieldAccelerator>,
+    pub sonifier: BinauralCockpitSonifier,
+    pub shared_audio_frame: std::sync::Arc<std::sync::Mutex<FieldAcousticFrame>>,
 
     // Framebuffer
     pub pixel_buffer: Vec<u8>,
@@ -384,6 +346,10 @@ impl BreakoutFieldGame {
             },
             saved_branch: None,
             gpu_accel: None,
+            sonifier: BinauralCockpitSonifier::new(4.0, 2048),
+            shared_audio_frame: std::sync::Arc::new(std::sync::Mutex::new(
+                FieldAcousticFrame::default(),
+            )),
             pixel_buffer: vec![0; width * height * 4],
         };
 
@@ -398,19 +364,13 @@ impl BreakoutFieldGame {
         if self.gpu_accel.is_some() {
             return true;
         }
-        if let Ok(ctx) = pollster::block_on(GpuContext::init_headless()) {
-            if let Ok(sim) = GpuSimulation::new(
-                &ctx,
-                &self.solver.state,
-                &self.solver.material,
-                &self.solver.boundary,
-                &self.solver.config,
-            ) {
-                self.gpu_accel = Some(GpuFieldAccelerator { ctx, sim });
-                return true;
-            }
-        }
-        false
+        self.gpu_accel = GpuFieldAccelerator::try_new(
+            &self.solver.state,
+            &self.solver.material,
+            &self.solver.boundary,
+            &self.solver.config,
+        );
+        self.gpu_accel.is_some()
     }
 
     /// Toggle hardware WGPU compute acceleration on/off (`[G]`).
@@ -651,9 +611,11 @@ impl BreakoutFieldGame {
         let px0 = (self.paddle_x as usize).clamp(2, w.saturating_sub(self.paddle_w + 3));
         let px1 = (px0 + self.paddle_w - 1).min(w - 3);
 
+        // In clean quantum vacuum, the paddle is a reflective solid boundary;
+        // zero imposed wall_vx prevents sliding the paddle in empty space from pumping water-like wakes.
         self.solver
             .boundary
-            .set_moving_rect(px0, px1, py0, py1, self.paddle_vx, 0.0);
+            .set_moving_rect(px0, px1, py0, py1, 0.0, 0.0);
     }
 
     /// Move player paddle horizontally by `dx` cells.
@@ -721,6 +683,9 @@ impl BreakoutFieldGame {
         // Launch an impedance-matched unidirectional wave packet straight up (-PI/2)
         let mut packet = DirectionalWavePacket::new(pulse_x, pulse_y, 2.2, 3.2, -FRAC_PI_2);
         packet.inject(&mut self.solver.state, &self.solver.material);
+        if let Ok(mut guard) = self.shared_audio_frame.lock() {
+            guard.trigger_player_laser(true);
+        }
         true
     }
 
@@ -1119,8 +1084,42 @@ impl BreakoutFieldGame {
             }
         }
 
-        // Hamiltonian energy accounting
+        // Hamiltonian energy accounting & live hardware field sonification
         self.field_energy = FieldEnergy::compute(&self.solver.state, &self.solver.material);
+        let listener_x = self.paddle_x + self.paddle_w as f32 * 0.5;
+        let listener_y = self.paddle_y as f32;
+        let a_frame = self.sonifier.sample_full_field(
+            &self.solver.state,
+            &self.solver.material,
+            listener_x,
+            listener_y,
+            self.paddle_vx,
+            0.0,
+            -FRAC_PI_2,
+            false,
+        );
+        if let Ok(mut guard) = self.shared_audio_frame.try_lock() {
+            guard.merge_telemetry(&a_frame);
+            match event {
+                StepEvent::BrickBroken { row, .. } => {
+                    let spec = BrickMaterialSpec::for_row(row);
+                    let _c = (spec.bulk_modulus / spec.rho).sqrt();
+                    guard.trigger_cavitation_break(0.0, 1.5);
+                }
+                StepEvent::BrickCracked { row, .. } => {
+                    let spec = BrickMaterialSpec::for_row(row);
+                    let c = (spec.bulk_modulus / spec.rho).sqrt();
+                    guard.trigger_crystal_crack(0.0, c);
+                }
+                StepEvent::PaddleHit => {
+                    guard.trigger_crystal_crack(0.0, 1.15);
+                }
+                StepEvent::WallHit => {
+                    guard.trigger_crystal_crack(0.0, 0.90);
+                }
+                _ => {}
+            }
+        }
 
         if self.score > self.high_score {
             self.high_score = self.score;

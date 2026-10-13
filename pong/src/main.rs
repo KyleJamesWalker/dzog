@@ -1,4 +1,4 @@
-//! Dzoglang Field-First Solid-State Breakout Benchmark & GUI.
+//! Dzog Field-First Solid-State Breakout Benchmark & GUI.
 
 pub mod field_game;
 pub mod gui;
@@ -15,12 +15,12 @@ fn main() {
         return;
     }
 
-    println!("Launching Dzoglang Solid-State & Quantum-Vacuum Breakout GUI...");
+    println!("Launching Dzog Solid-State & Quantum-Vacuum Breakout GUI...");
     gui::launch_gui();
 }
 
 fn run_headless_benchmark() {
-    println!("=== Dzoglang Solid-State & Quantum-Vacuum Breakout Benchmark ===");
+    println!("=== Dzog Solid-State & Quantum-Vacuum Breakout Benchmark ===");
     let mut game = BreakoutFieldGame::new(128, 80);
 
     // 1. WGPU Hardware Compute Benchmark

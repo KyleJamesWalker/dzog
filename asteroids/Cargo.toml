@@ -1,14 +1,13 @@
 [package]
 name = "asteroids"
-version = "0.1.0"
-edition = "2021"
-description = "Field-First Crystalline Asteroids & Alien Ecology Demo on the Dzoglang PDE Lattice"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Field-First Crystalline Asteroids & Alien Ecology showcase for the Dzog Bevy field engine"
 
 [dependencies]
 dzog-core = { path = "../crates/dzog-core" }
 dzog-wgpu = { path = "../crates/dzog-wgpu" }
+dzog-bevy = { path = "../crates/dzog-bevy" }
 pollster = { workspace = true }
-crossterm = { workspace = true }
 bevy = { workspace = true }
-log = { workspace = true }
-env_logger = { workspace = true }

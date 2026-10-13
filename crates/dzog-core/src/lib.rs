@@ -1,4 +1,4 @@
-//! Dzoglang Core: Acoustic field PDE engine and reference solver.
+//! Dzog Core: Acoustic field PDE engine and reference solver.
 //!
 //! Implements linear acoustics on a heterogeneous 2D staggered finite-difference lattice:
 //! - Center pressure p, East-face horizontal velocity vx, North-face vertical velocity vy.

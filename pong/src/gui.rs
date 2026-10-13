@@ -1,12 +1,11 @@
-//! Bevy 0.15 GUI application and retro pixel display for Field-First Solid-State Breakout.
+//! Bevy 0.15 GUI & `dzog_bevy` integration for Field-First Solid-State Breakout.
 
 use bevy::{
     prelude::*,
-    render::{
-        render_asset::RenderAssetUsages,
-        render_resource::{Extent3d, TextureDimension, TextureFormat},
-    },
     window::PrimaryWindow,
+};
+use dzog_bevy::{
+    spawn_field_canvas_and_audio, DzogBevyPlugin, DzogFieldAudioSource, FieldImageHandle,
 };
 use crate::field_game::BreakoutFieldGame;
 
@@ -15,9 +14,6 @@ pub struct GameStateResource {
     pub game: BreakoutFieldGame,
     pub paused: bool,
 }
-
-#[derive(Resource)]
-pub struct FieldImageHandle(pub Handle<Image>);
 
 #[derive(Component)]
 pub struct ScoreText;
@@ -34,12 +30,13 @@ pub fn launch_gui() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
-                title: "Dzoglang — Solid-State & Quantum-Vacuum Breakout".into(),
+                title: "Dzog — Solid-State & Quantum-Vacuum Breakout".into(),
                 resolution: (1024.0_f32, 640.0_f32).into(),
                 ..default()
             }),
             ..default()
         }))
+        .add_plugins(DzogBevyPlugin)
         .insert_resource(GameStateResource {
             game,
             paused: false,
@@ -52,39 +49,29 @@ pub fn launch_gui() {
 fn setup_scene(
     mut commands: Commands,
     mut images: ResMut<Assets<Image>>,
+    mut audio_assets: ResMut<Assets<DzogFieldAudioSource>>,
     mut game_res: ResMut<GameStateResource>,
 ) {
-    commands.spawn(Camera2d);
-
     game_res.game.render_to_pixel_buffer();
-
     let w = game_res.game.width as u32;
     let h = game_res.game.height as u32;
+    let shared_audio = if std::env::args().any(|a| a == "--mute") {
+        None
+    } else {
+        Some(game_res.game.shared_audio_frame.clone())
+    };
 
-    let mut image = Image::new_fill(
-        Extent3d {
-            width: w,
-            height: h,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
+    spawn_field_canvas_and_audio(
+        &mut commands,
+        &mut images,
+        &mut audio_assets,
+        w,
+        h,
         &game_res.game.pixel_buffer,
-        TextureFormat::Rgba8UnormSrgb,
-        RenderAssetUsages::default(),
+        Vec2::new(960.0, 580.0),
+        -15.0,
+        shared_audio,
     );
-    image.sampler = bevy::image::ImageSampler::nearest();
-
-    let image_handle = images.add(image);
-    commands.insert_resource(FieldImageHandle(image_handle.clone()));
-
-    commands.spawn((
-        Sprite {
-            image: image_handle,
-            custom_size: Some(Vec2::new(960.0, 580.0)),
-            ..default()
-        },
-        Transform::from_xyz(0.0, -15.0, 0.0),
-    ));
 
     commands
         .spawn((

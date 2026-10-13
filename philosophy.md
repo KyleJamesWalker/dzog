@@ -1,12 +1,12 @@
-# Dzoglang Philosophy
+# Dzog Philosophy
 
 ## The Proposal
 
-Dzoglang is a relation-first runtime and programming medium whose substrate is a continuous physical field. Rather than assembling isolated objects and imperative scripts, authors compose a **living ecology of actors** governed by wave mechanics, nonlinear self-cohesion, and quantum-inspired guidance laws.
+Dzog is a relation-first runtime and programming medium whose substrate is a continuous physical field. Rather than assembling isolated objects and imperative scripts, authors compose a **living ecology of actors** governed by wave mechanics, nonlinear self-cohesion, and quantum-inspired guidance laws.
 
 In conventional game and application engines, entities are sealed state containers sitting in empty coordinate space. They interact only when a broad-phase collider or event bus explicitly schedules a callback. Between discrete events, the world is inert.
 
-In Dzoglang, the medium itself is alive. Every actor—whether a coherent solitary wave packet (soliton), a semi-permeable membrane, a resonant cavity, or a moving boundary—is coupled to a shared Hamiltonian lattice. Entities radiate wakes, sense distant activity through interference gradients, fracture along continuous stress tensors, and reorganize one another without centralized orchestration.
+In Dzog, the medium itself is alive. Every actor—whether a coherent solitary wave packet (soliton), a semi-permeable membrane, a resonant cavity, or a moving boundary—is coupled to a shared Hamiltonian lattice. Entities radiate wakes, sense distant activity through interference gradients, fracture along continuous stress tensors, and reorganize one another without centralized orchestration.
 
 We do not abolish symbols; we stop making symbolic isolation the starting point.
 
@@ -43,17 +43,17 @@ where $R$ is the field amplitude envelope. Unlike classical forces that decay pu
 
 James Hillman's distinction between *symbol* and *image* protects ecological particularity.[^1] A symbol reduces an appearance to a detached dictionary entry; an **image** retains its context, mood, topology, and internal relations.
 
-In Dzoglang, an executable image is not a flat bitmap or a node-and-wire diagram. It is a situated whole:
+In Dzog, an executable image is not a flat bitmap or a node-and-wire diagram. It is a situated whole:
 - **Inhesion**: An actor's behavior depends on the impedance, damping, and wave activity of its surrounding neighborhood. Relocation into a stiffer or more viscous medium alters its resonance and pace automatically.
 - **Relational Commitments**: Instead of scripting every frame of an animation, authors specify what yields, what reflects, what coheres, and which invariants hold under perturbation.
 
-[^1]: The name *Dzoglang* nods to the contemplative concept of *lhundrub* (spontaneous presence) in Dzogchen: encountering a total situation prior to segmenting it into isolated conceptual categories. Here this serves strictly as an interface design analogy—letting users encounter and perturb a living field before demanding symbolic classification—not a metaphysical or contemplative claim.
+[^1]: The name *Dzog* nods to the contemplative concept of *lhundrub* (spontaneous presence) in Dzogchen: encountering a total situation prior to segmenting it into isolated conceptual categories. Here this serves strictly as an interface design analogy—letting users encounter and perturb a living field before demanding symbolic classification—not a metaphysical or contemplative claim.
 
 ---
 
 ## A Living Ecology of Actors
 
-To make games and interactive applications feel genuinely alive, Dzoglang replaces rigid-body conventions with four ecological mechanisms:
+To make games and interactive applications feel genuinely alive, Dzog replaces rigid-body conventions with four ecological mechanisms:
 
 1. **Radiative Presence**:
    Moving actors are never silent coordinates. A moving paddle or soliton continuously performs mechanical work on the lattice ($v_n = v_{\text{actor}}$), radiating Doppler-shifted pressure wakes and sensing returning echoes from the environment.

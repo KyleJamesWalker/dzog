@@ -2,7 +2,7 @@
 name = "dzog-core"
 version = "0.1.0"
 edition = "2021"
-description = "Core acoustic field PDE engine and reference solver for Dzoglang"
+description = "Core acoustic field PDE engine and reference solver for Dzog"
 
 [dependencies]
 serde = { workspace = true }
