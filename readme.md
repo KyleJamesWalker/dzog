@@ -4,11 +4,72 @@ A relation-first programming and artistic medium. Author a landscape of laws,
 materials, boundaries, and excitations; encounter its behavior through image,
 sound, and direct intervention.
 
-Status: proposal only. No application or runtime has been implemented.
+Status: active Rust/WGPU runtime and interactive field demos implemented (`dzog-core`, `dzog-wgpu`, `dzog-app`, `pong`).
 
 Read [philosophy.md](./philosophy.md) for the principles and limits behind this
-proposal. This plan replaces the three-pulse browser sketch with a native
-Rust/WGPU field instrument.
+medium, and [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) for the field-first
+architecture.
+
+## Current State & Workspace Crates
+
+| Crate | Role | Status |
+| --- | --- | --- |
+| `crates/dzog-core` | 2D Yee-staggered FDTD acoustic/soliton solver, heterogeneous materials ($\rho, K, \gamma$), continuous cohesion & overpressure erosion, Bohm-Hiley quantum potential ($Q = -\nabla^2 R / R$), moving boundaries, Hamiltonian energy accounting, pressure probes, offline WAV export, RON `FieldSpec` & `Checkpoint` serialization. | Implemented & tested |
+| `crates/dzog-wgpu` | GPU-native compute pipeline (`velocity.wgsl`, `pressure.wgsl`, `render.wgsl`) with ping-pong `RGBA32Float` state textures, material/boundary textures, and verified CPU/GPU numerical agreement ($< 10^{-4}$). | Implemented & tested |
+| `crates/dzog-app` | Native `winit` + `wgpu` interactive acoustic field canvas for direct wave excitation and boundary inspection. | Implemented |
+| `pong` | **Field-First Soliton Breakout** (Bevy 0.15 GUI + headless benchmark): demonstrates point-of-impact directional fracturing, semi-permeable cracked bricks, acoustic wave-induced cleaving (domino chain reactions), heterogeneous brick media, Bohmian + radiation pressure ball guidance, counterfactual branching, and multi-view inspection. | Implemented & tested |
+
+## Running the Demos & Tests
+
+### 1. Field-First Soliton Breakout (`pong`)
+
+Launch the interactive Bevy 0.15 retro CRT GUI:
+
+```bash
+cargo run -p pong
+```
+
+**Controls & Interactive Capabilities:**
+- `A` / `D` or `Left` / `Right`: Move player paddle (imparts moving boundary velocity $v_n$ to the Yee lattice).
+- `Space`: Launch ball from paddle (or restart after Game Over / Victory).
+- `T`: Toggle **Sonic Blast & Field Coupling (`ON` / `OFF`)** — counterfactual comparator between full field-coupled physics (cavitation shockwaves, $-\nabla p$ radiation force, $-\nabla Q$ Bohmian guidance, wave-induced brick cleaving) and decoupled classical kinematics.
+- `V`: Cycle **Perceptual Field Views** (`philosophy.md` §Multiple Views):
+  1. *Arcade + Wavefield*: Compressions (amber), rarefactions (cyan), velocity shimmer, and procedural fracture veins.
+  2. *Pressure $p$ & Bohmian $Q$*: Scalar pressure and Bohm-Hiley quantum potential guidance ridges.
+  3. *Velocity $\mathbf{v}$ & Energy Flux*: Particle velocity magnitude and acoustic Poynting flux ($p\mathbf{v}$).
+  4. *Impedance $Z$ & Cohesion $C$*: Material impedance ($\sqrt{\rho K}$) and structural cell cohesion ($C(x,y) \in [0, 1]$).
+- `B` / `U`: **Save (`B`) / Restore (`U`) Branch Checkpoint** — snapshot the full field and game state, toggle `T` or paint a barrier, and compare how the situation unfolds.
+- `Left-Click`: Inject a live Gaussian acoustic pressure impulse at the cursor (deflect the ball or cleave weakened bricks with sound).
+- `Right-Click` (hold/drag): Paint high-impedance acoustic reflector barriers into the arena.
+- `P`: Pause / resume simulation.
+- `R`: Reset arena.
+
+Run the headless physics & rasterization benchmark:
+
+```bash
+cargo run -p pong -- --bench
+```
+
+### 2. Native WGPU Acoustic Field Instrument (`dzog-app`)
+
+Launch the standalone `winit` + `wgpu` GPU compute field canvas:
+
+```bash
+cargo run -p dzog-app
+```
+
+- `Left-Click` / `Drag` or `Space`: Inject Gaussian pressure impulses into the GPU lattice.
+- `P`: Pause / resume GPU compute stepping.
+- `C`: Clear field state to zero.
+- `Esc` / `Q`: Exit.
+
+### 3. Automated Validation Suite
+
+Run all 21 unit, gate, GPU/CPU agreement, and field-physics validation tests across the workspace:
+
+```bash
+cargo test --workspace
+```
 
 ## First Experiment
 

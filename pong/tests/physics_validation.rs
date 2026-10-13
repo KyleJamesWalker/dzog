@@ -109,6 +109,131 @@ fn test_two_hit_brick_destruction() {
 }
 
 #[test]
+fn test_blast_toggle_disables_shockwave_and_force() {
+    let mut game = BreakoutFieldGame::new(80, 48);
+    game.wave_force_enabled = false; // Toggle OFF (Counterfactual decoupled mode)
+    game.solver.state.clear();
+
+    // Brick 24 is at (9, 31), well inside the 80x48 arena
+    let target_idx = 24;
+    let target = game.bricks[target_idx];
+    let brick_cx = target.x as f32 + target.w as f32 / 2.0;
+    let brick_bottom = (target.y + target.h) as f32;
+
+    // Force brick to 1 hit left so next hit shatters it
+    game.bricks[target_idx].hits_left = 1;
+    game.ball_attached = false;
+    game.ball_x = brick_cx;
+    game.ball_y = brick_bottom + 2.0;
+    game.ball_vx = 0.0;
+    game.ball_vy = -0.6;
+
+    let mut broken = false;
+    for _ in 0..30 {
+        if let StepEvent::BrickBroken { .. } = game.step() {
+            broken = true;
+            break;
+        }
+    }
+
+    assert!(broken, "Brick should still break kinematically when wave_force_enabled is OFF");
+    let p_max = game.solver.state.pressure.iter().copied().fold(0.0f32, |a, b| a.max(b.abs()));
+    assert_eq!(
+        p_max, 0.0,
+        "When wave_force_enabled is OFF, zero acoustic blast or wake should be injected (got {p_max})"
+    );
+}
+
+#[test]
+fn test_point_of_impact_directional_fracturing() {
+    let mut b_left = field_game::Brick::new(10, 10, 12, 4, 0);
+    let mut b_right = field_game::Brick::new(10, 10, 12, 4, 0);
+
+    // Strike b_left on its left edge (x = 10.0, y = 12.0, outward normal = (-1, 0))
+    b_left.apply_contact_fracture(10.0, 12.0, -1.0, 0.0);
+
+    // Strike b_right on its right edge (x = 21.0, y = 12.0, outward normal = (1, 0))
+    b_right.apply_contact_fracture(21.0, 12.0, 1.0, 0.0);
+
+    let left_edge_dmg_on_b_left: f32 = (0..4).map(|ry| b_left.damage[ry][0]).sum();
+    let right_edge_dmg_on_b_left: f32 = (0..4).map(|ry| b_left.damage[ry][11]).sum();
+
+    let left_edge_dmg_on_b_right: f32 = (0..4).map(|ry| b_right.damage[ry][0]).sum();
+    let right_edge_dmg_on_b_right: f32 = (0..4).map(|ry| b_right.damage[ry][11]).sum();
+
+    assert!(
+        left_edge_dmg_on_b_left > right_edge_dmg_on_b_left,
+        "Left-edge impact must concentrate fracture damage on left cells"
+    );
+    assert!(
+        right_edge_dmg_on_b_right > left_edge_dmg_on_b_right,
+        "Right-edge impact must concentrate fracture damage on right cells"
+    );
+}
+
+#[test]
+fn test_acoustic_wave_resonance_cleaving() {
+    let mut game = BreakoutFieldGame::new(128, 80);
+    game.wave_force_enabled = true;
+
+    // Select a bottom-row Sonic Resonator brick (row 3) and pre-crack it (hits_left = 1)
+    let target_idx = 24;
+    let target = game.bricks[target_idx];
+    let cx = target.x as f32 + target.w as f32 * 0.5;
+    let cy = target.y as f32 + target.h as f32 * 0.5;
+
+    game.bricks[target_idx].hits_left = 1;
+    game.bricks[target_idx].apply_contact_fracture(cx, cy + 2.0, 0.0, 1.0);
+    let b_copy = game.bricks[target_idx];
+    game.sync_single_brick_to_lattice(&b_copy);
+
+    let initial_remaining = game.bricks_remaining;
+
+    // Keep ball attached far away at the paddle so it cannot touch the brick
+    assert!(game.ball_attached);
+
+    // Inject a constructive acoustic shockwave right next to the cracked brick
+    game.inject_mouse_impulse(cx, cy + 2.0, 3.8);
+    game.step();
+
+    assert!(
+        !game.bricks[target_idx].is_alive(),
+        "Cracked brick should be cleaved purely by the acoustic shockwave without ball contact"
+    );
+    assert_eq!(game.bricks_remaining, initial_remaining - 1);
+    assert!(game.acoustic_cleaves >= 1);
+}
+
+#[test]
+fn test_counterfactual_branch_checkpoint_and_views() {
+    let mut game = BreakoutFieldGame::new(128, 80);
+    game.serve();
+    for _ in 0..5 {
+        game.step();
+    }
+
+    // Save counterfactual branch checkpoint
+    game.save_branch_checkpoint();
+    let saved_ball_x = game.ball_x;
+    let saved_ball_y = game.ball_y;
+    let saved_energy = game.field_energy.total;
+
+    // Advance 20 more steps and cycle view modes
+    for _ in 0..20 {
+        game.step();
+        game.cycle_view_mode();
+        game.render_to_pixel_buffer();
+    }
+    assert_ne!(game.ball_y, saved_ball_y);
+
+    // Restore branch checkpoint
+    assert!(game.restore_branch_checkpoint());
+    assert_eq!(game.ball_x, saved_ball_x);
+    assert_eq!(game.ball_y, saved_ball_y);
+    assert!((game.field_energy.total - saved_energy).abs() < 1e-5);
+}
+
+#[test]
 fn test_acoustic_radiation_force_coupling() {
     let mut game = BreakoutFieldGame::new(64, 40);
     game.ball_attached = false;

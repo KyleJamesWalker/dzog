@@ -1,34 +1,125 @@
 //! Field-First Breakout Pong: Single-player Breakout on the Dzog acoustic lattice.
 //!
-//! Demonstrates Dzoglang's core philosophy:
-//! - Paddles and Bricks are physical acoustic boundaries and impedance interfaces on the Yee lattice.
-//! - Bricks withstand 2 hits:
-//!   - 1st hit: Mechanical stress fracture. Injects acoustic stress pulse, shifts color and shows fracture veins.
-//!   - 2nd hit: Cavitation rupture! Injects explosive sonic burst into the lattice, boundary is cleared,
-//!     opening space for sound waves and the ball to pass through.
-//! - Acoustic Radiation Force: Sonic blast pressure gradients -grad(p) dynamically push the ball.
-//! - Real-time Hamiltonian field energy accounting (potential, kinetic, total).
-//! - Retro CRT RGBA8 pixel rasterization with scanlines, breakable brick art, and wave ripple optics.
+//! Demonstrates Dzoglang's core philosophy (`philosophy.md` & `readme.md`):
+//! - Paddles and Bricks are physical acoustic boundaries and heterogeneous impedance media on the Yee lattice.
+//! - Point-of-Impact Dynamic Structural Fracturing:
+//!   - Bricks track a local 2D cell damage field `damage[4][12]` and contact impact vectors.
+//!   - 1st hit: Carves directional fracture fissures from the exact contact point $(cx, cy)$ along the stress tensor,
+//!     opening semi-permeable wave channels through the brick's heterogeneous medium ($\rho, K, \gamma$).
+//!   - 2nd hit (or Acoustic Wave Cleave): Cavitation rupture! Clears boundary, relaxes material to ambient fluid,
+//!     and (when field coupling is enabled) injects an explosive sonic burst into the lattice.
+//! - Acoustic Wave-Induced Cleaving: Constructive interference ($|p| > p_{\text{cleave}}$) shatters weakened bricks
+//!   without the ball touching them, triggering domino chain reactions.
+//! - Bohm-Hiley Quantum Potential ($Q = -\nabla^2 R / R$) & Radiation Pressure ($-\nabla p$) wave-guided ball dynamics.
+//! - Counterfactual Branching (`[B]`/`[U]`), Multi-View Inspection (`[V]`), and Mouse Perturbation.
 
 use dzog_core::*;
 
-/// A breakable brick on the acoustic lattice.
+/// Perceptual inspection view mode (`philosophy.md` §Multiple Views).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FieldViewMode {
+    /// Default arcade view: pressure waves, kinetic shimmer, and procedural fracture veins.
+    CompositeArcade,
+    /// Scalar pressure p(x,y) and Bohmian Quantum Potential Q(x,y) guidance ridges.
+    PressureAndBohmian,
+    /// Particle velocity |v| and instantaneous acoustic energy flux (Poynting vector p*v).
+    VelocityAndFlux,
+    /// Material acoustic impedance Z(x,y) = sqrt(rho * K) and structural cohesion C(x,y).
+    ImpedanceAndCohesion,
+}
+
+#[allow(dead_code)]
+impl FieldViewMode {
+    pub fn next(self) -> Self {
+        match self {
+            Self::CompositeArcade => Self::PressureAndBohmian,
+            Self::PressureAndBohmian => Self::VelocityAndFlux,
+            Self::VelocityAndFlux => Self::ImpedanceAndCohesion,
+            Self::ImpedanceAndCohesion => Self::CompositeArcade,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::CompositeArcade => "Arcade + Wavefield",
+            Self::PressureAndBohmian => "Pressure p & Bohmian Q",
+            Self::VelocityAndFlux => "Velocity v & Energy Flux",
+            Self::ImpedanceAndCohesion => "Impedance Z & Cohesion C",
+        }
+    }
+}
+
+/// Physical acoustic material properties per brick row.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BrickMaterialSpec {
+    pub name: &'static str,
+    pub rho: f32,
+    pub bulk_modulus: f32,
+    pub damping: f32,
+    pub cleave_pressure: f32,
+}
+
+impl BrickMaterialSpec {
+    pub const fn for_row(row: u8) -> Self {
+        match row {
+            // Row 0: Crystal Quartz — Fast wave speed (c ~ 1.39), low loss, rings with high-pitch modes
+            0 => Self {
+                name: "Crystal Quartz",
+                rho: 0.75,
+                bulk_modulus: 1.45,
+                damping: 0.001,
+                cleave_pressure: 2.05,
+            },
+            // Row 1: Basalt Anvil — High impedance (Z ~ 1.96), reflects & channels focused shockwaves
+            1 => Self {
+                name: "Basalt Anvil",
+                rho: 2.20,
+                bulk_modulus: 1.75,
+                damping: 0.004,
+                cleave_pressure: 2.25,
+            },
+            // Row 2: Viscous Metamaterial — Slow wave speed (c ~ 0.68), refractive acoustic lens & damper
+            2 => Self {
+                name: "Viscous Lens",
+                rho: 1.30,
+                bulk_modulus: 0.60,
+                damping: 0.055,
+                cleave_pressure: 1.95,
+            },
+            // Row 3+: Sonic Resonator — Tuned cavity impedance, brittle under constructive wave interference
+            _ => Self {
+                name: "Sonic Resonator",
+                rho: 0.90,
+                bulk_modulus: 1.15,
+                damping: 0.002,
+                cleave_pressure: 1.30,
+            },
+        }
+    }
+}
+
+/// A breakable brick on the acoustic lattice with local cell damage and contact fracture state.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Brick {
     /// Left column on the grid.
     pub x: usize,
     /// Top row on the grid.
     pub y: usize,
-    /// Width in cells.
+    /// Width in cells (standard: 12).
     pub w: usize,
-    /// Height in cells.
+    /// Height in cells (standard: 4).
     pub h: usize,
-    /// Hits remaining before physical destruction (2 = solid, 1 = cracked, 0 = destroyed).
+    /// Structural state before full cavitation rupture (2 = intact, 1 = fractured/semi-permeable, 0 = shattered).
     pub hits_left: u8,
-    /// Row index (0..3) determining color palette and point value.
+    /// Row index (0..3) determining physical material $(\rho, K, \gamma)$ and palette.
     pub row: u8,
+    /// Local 2D cell damage field in [0.0, 1.0] (0.0 = pristine solid, 1.0 = fractured fissure).
+    pub damage: [[f32; 12]; 4],
+    /// Last point-of-contact in local brick coordinates (lx, ly) and inward impact normal (nx, ny).
+    pub last_contact: Option<(f32, f32, f32, f32)>,
 }
 
+#[allow(dead_code)]
 impl Brick {
     pub fn new(x: usize, y: usize, w: usize, h: usize, row: u8) -> Self {
         Self {
@@ -38,23 +129,113 @@ impl Brick {
             h,
             hits_left: 2,
             row,
+            damage: [[0.0; 12]; 4],
+            last_contact: None,
         }
     }
 
-    /// Whether this brick is intact and physically blocking.
+    /// Whether this brick is still present on the lattice.
     #[inline]
     pub fn is_alive(&self) -> bool {
         self.hits_left > 0
     }
+
+    /// Material specification for this brick's row.
+    #[inline]
+    pub fn material_spec(&self) -> BrickMaterialSpec {
+        BrickMaterialSpec::for_row(self.row)
+    }
+
+    /// Mean structural cohesion across all cells of this brick in [0.0, 1.0].
+    pub fn mean_cohesion(&self) -> f32 {
+        let mut sum = 0.0f32;
+        for ry in 0..4 {
+            for rx in 0..12 {
+                sum += 1.0 - self.damage[ry][rx].clamp(0.0, 1.0);
+            }
+        }
+        sum / 48.0
+    }
+
+    /// Carve procedural fracture fissures radiating from the exact world contact point `(cx, cy)`
+    /// along the impact stress direction `(-normal_x, -normal_y)`.
+    pub fn apply_contact_fracture(&mut self, cx: f32, cy: f32, normal_x: f32, normal_y: f32) {
+        let lx = (cx - self.x as f32).clamp(0.0, (self.w.saturating_sub(1)) as f32);
+        let ly = (cy - self.y as f32).clamp(0.0, (self.h.saturating_sub(1)) as f32);
+
+        // Inward stress propagation vector (opposite to outward rebound normal)
+        let dir_x = -normal_x;
+        let mut dir_y = -normal_y;
+        if dir_x.abs() < 0.01 && dir_y.abs() < 0.01 {
+            dir_y = -1.0;
+        }
+        self.last_contact = Some((lx, ly, dir_x, dir_y));
+
+        // 1. Impact crater around contact point (cx, cy)
+        for ry in 0..4 {
+            for rx in 0..12 {
+                let dx = rx as f32 - lx;
+                let dy = ry as f32 - ly;
+                let dist = (dx * dx + dy * dy).sqrt();
+                if dist <= 1.6 {
+                    let crater_dmg = (1.0 - dist / 2.0).clamp(0.55, 1.0);
+                    self.damage[ry][rx] = self.damage[ry][rx].max(crater_dmg);
+                }
+            }
+        }
+
+        // 2. Trace 3 fracture rays from (lx, ly): primary stress axis + two shear branches
+        let base_angle = dir_y.atan2(dir_x);
+        let branch_offsets = [0.0f32, 0.52f32, -0.52f32];
+
+        for (b_idx, &ang_offset) in branch_offsets.iter().enumerate() {
+            let angle = base_angle + ang_offset;
+            let vx = angle.cos();
+            let vy = angle.sin();
+            let max_steps = if b_idx == 0 { 24 } else { 16 };
+
+            for step in 0..max_steps {
+                let t = step as f32 * 0.45;
+                // Deterministic jagged shear perturbation
+                let jitter = ((step as f32 * 1.7 + b_idx as f32 * 2.3).sin()) * 0.35;
+                let px = (lx + vx * t - vy * jitter).round() as isize;
+                let py = (ly + vy * t + vx * jitter).round() as isize;
+
+                if px >= 0 && px < 12 && py >= 0 && py < 4 {
+                    let intensity = if b_idx == 0 { 0.95 } else { 0.80 };
+                    self.damage[py as usize][px as usize] =
+                        self.damage[py as usize][px as usize].max(intensity);
+                }
+            }
+        }
+    }
+}
+
+/// Complete snapshot of a Breakout game & field situation for counterfactual branching (`[B]`/`[U]`).
+#[derive(Debug, Clone)]
+pub struct GameBranchSnapshot {
+    pub checkpoint: Checkpoint,
+    pub bricks: Vec<Brick>,
+    pub bricks_remaining: usize,
+    pub paddle_x: f32,
+    pub paddle_vx: f32,
+    pub ball_x: f32,
+    pub ball_y: f32,
+    pub ball_vx: f32,
+    pub ball_vy: f32,
+    pub ball_attached: bool,
+    pub lives: u32,
+    pub score: u32,
+    pub combo: u32,
 }
 
 /// Simulation event emitted during a physics step.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StepEvent {
     None,
-    /// Brick was struck for the 1st time, causing stress cracks.
+    /// Brick was struck for the 1st time, carving directional contact stress fissures.
     BrickCracked { brick_idx: usize, row: u8 },
-    /// Brick was struck for the 2nd time, physically shattering.
+    /// Brick was shattered (by ball impact or acoustic wave resonance).
     BrickBroken { brick_idx: usize, row: u8, remaining: usize },
     /// Ball rebounded off the player's paddle.
     PaddleHit,
@@ -76,6 +257,7 @@ pub struct BreakoutFieldGame {
     // Bricks
     pub bricks: Vec<Brick>,
     pub bricks_remaining: usize,
+    pub acoustic_cleaves: u32,
 
     // Paddle kinematics & lattice boundary
     pub paddle_x: f32,
@@ -99,9 +281,11 @@ pub struct BreakoutFieldGame {
     pub high_score: u32,
     pub combo: u32,
 
-    // Engine mechanics
+    // Engine mechanics & inspection
     pub wave_force_enabled: bool,
+    pub view_mode: FieldViewMode,
     pub field_energy: FieldEnergy,
+    pub saved_branch: Option<GameBranchSnapshot>,
 
     // Framebuffer
     pub pixel_buffer: Vec<u8>,
@@ -116,11 +300,17 @@ impl BreakoutFieldGame {
         let grid = GridConfig::new(width, height, 1.0, 1.0);
         let state = AcousticState::new(grid);
 
-        // Acoustic medium with slight damping to keep waves lively but bounded
-        let material = MaterialField::homogeneous(grid, 1.0, 1.0, 0.007);
+        // Ambient fluid medium with slight damping; reserve CFL headroom for high-speed Quartz (c = sqrt(1.75/0.75))
+        let mut material = MaterialField::homogeneous(grid, 1.0, 1.0, 0.007);
+        // Seed corner cell with max wave-speed bound so compute_cfl_dt accounts for all heterogeneous brick rows
+        material.density[0] = 0.70;
+        material.bulk_modulus[0] = 1.80;
+        let dt = SolverConfig::compute_cfl_dt(&grid, &material, 0.7);
+        material.density[0] = 1.0;
+        material.bulk_modulus[0] = 1.0;
+
         let boundary = BoundaryMask::new(grid, OuterBoundaryRule::RigidWall);
 
-        let dt = SolverConfig::compute_cfl_dt(&grid, &material, 0.7);
         let nl = NonlinearLaw {
             beta: 0.55,
             alpha: 0.35,
@@ -140,6 +330,7 @@ impl BreakoutFieldGame {
             height,
             bricks: Vec::new(),
             bricks_remaining: 0,
+            acoustic_cleaves: 0,
             paddle_x,
             paddle_y,
             paddle_w,
@@ -157,7 +348,13 @@ impl BreakoutFieldGame {
             high_score: 0,
             combo: 0,
             wave_force_enabled: true,
-            field_energy: FieldEnergy { potential: 0.0, kinetic: 0.0, total: 0.0 },
+            view_mode: FieldViewMode::CompositeArcade,
+            field_energy: FieldEnergy {
+                potential: 0.0,
+                kinetic: 0.0,
+                total: 0.0,
+            },
+            saved_branch: None,
             pixel_buffer: vec![0; width * height * 4],
         };
 
@@ -194,12 +391,16 @@ impl BreakoutFieldGame {
     pub fn reset_game(&mut self) {
         self.solver.state.clear();
         self.solver.boundary.clear_interior();
+        let grid = self.solver.state.config;
+        self.solver.material = MaterialField::homogeneous(grid, 1.0, 1.0, 0.007);
+
         self.init_bricks();
         self.sync_all_brick_boundaries();
 
         self.lives = 3;
         self.score = 0;
         self.combo = 0;
+        self.acoustic_cleaves = 0;
         self.in_play = true;
 
         self.paddle_x = (self.width as f32 - self.paddle_w as f32) / 2.0;
@@ -213,23 +414,82 @@ impl BreakoutFieldGame {
         self.ball_vy = 0.0;
     }
 
-    /// Enforce rigid acoustic boundary conditions for all living bricks on the lattice.
+    /// Synchronize all living bricks' heterogeneous material properties $(\rho, K, \gamma)$,
+    /// cohesion field, and boundary walls on the Yee lattice.
     pub fn sync_all_brick_boundaries(&mut self) {
-        let w = self.width;
-        let h = self.height;
-
-        for b in &self.bricks {
+        let bricks_clone = self.bricks.clone();
+        for b in &bricks_clone {
             if b.is_alive() {
-                let x_min = b.x.saturating_sub(1);
-                let x_max = (b.x + b.w - 1).min(w - 1);
-                let y_min = b.y.saturating_sub(1);
-                let y_max = (b.y + b.h - 1).min(h - 1);
-                self.solver.boundary.set_moving_rect(x_min, x_max, y_min, y_max, 0.0, 0.0);
+                self.sync_single_brick_to_lattice(b);
             }
         }
     }
 
-    /// Clear a specific brick's boundary from the lattice when destroyed.
+    /// Write a single brick's material and fracture-aware boundary state into the solver lattice.
+    pub fn sync_single_brick_to_lattice(&mut self, b: &Brick) {
+        let w = self.width;
+        let h = self.height;
+        let spec = b.material_spec();
+
+        let x_min = b.x.saturating_sub(1);
+        let x_max = (b.x + b.w - 1).min(w - 1);
+        let y_min = b.y.saturating_sub(1);
+        let y_max = (b.y + b.h - 1).min(h - 1);
+
+        // 1. Set heterogeneous material parameters and cell cohesion
+        for ry in 0..b.h.min(4) {
+            for rx in 0..b.w.min(12) {
+                let gx = (b.x + rx).min(w - 1);
+                let gy = (b.y + ry).min(h - 1);
+                let idx = self.solver.state.config.index(gx, gy);
+                let dmg = b.damage[ry][rx].clamp(0.0, 1.0);
+                let coh = if b.hits_left == 2 {
+                    1.0
+                } else {
+                    (1.0 - dmg).clamp(0.05, 0.85)
+                };
+
+                self.solver.material.density[idx] = spec.rho;
+                self.solver.material.bulk_modulus[idx] = spec.bulk_modulus;
+                self.solver.material.damping[idx] = spec.damping;
+                self.solver.material.cohesion[idx] = coh;
+                self.solver.material.yield_pressure[idx] = spec.cleave_pressure;
+            }
+        }
+
+        // 2. Enforce rigid walls for intact cells; open semi-permeable channels along fracture veins!
+        if b.hits_left == 2 {
+            self.solver
+                .boundary
+                .set_moving_rect(x_min, x_max, y_min, y_max, 0.0, 0.0);
+        } else if b.hits_left == 1 {
+            self.solver
+                .boundary
+                .set_moving_rect(x_min, x_max, y_min, y_max, 0.0, 0.0);
+            // Unblock fractured cells so acoustic waves refract and tunnel through cracks
+            for ry in 0..b.h.min(4) {
+                for rx in 0..b.w.min(12) {
+                    if b.damage[ry][rx] >= 0.55 {
+                        let gx = (b.x + rx).min(w - 1);
+                        let gy = (b.y + ry).min(h - 1);
+                        let idx = self.solver.state.config.index(gx, gy);
+                        self.solver.boundary.wall_east[idx] = false;
+                        self.solver.boundary.wall_north[idx] = false;
+                        if gx > 0 {
+                            let idx_w = self.solver.state.config.index(gx - 1, gy);
+                            self.solver.boundary.wall_east[idx_w] = false;
+                        }
+                        if gy > 0 {
+                            let idx_s = self.solver.state.config.index(gx, gy - 1);
+                            self.solver.boundary.wall_north[idx_s] = false;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Clear a specific brick's boundary and relax its material back to ambient fluid when destroyed.
     pub fn clear_brick_boundary(&mut self, b: &Brick) {
         let w = self.width;
         let h = self.height;
@@ -238,6 +498,17 @@ impl BreakoutFieldGame {
         let y_min = b.y.saturating_sub(1);
         let y_max = (b.y + b.h - 1).min(h - 1);
         self.solver.boundary.clear_region(x_min, x_max, y_min, y_max);
+        self.solver.material.set_cohesive_region(
+            b.x,
+            (b.x + b.w).min(w),
+            b.y,
+            (b.y + b.h).min(h),
+            1.0,
+            1.0,
+            0.007,
+            0.0,
+            f32::INFINITY,
+        );
     }
 
     /// Update paddle position as a moving boundary on the Yee lattice.
@@ -254,7 +525,9 @@ impl BreakoutFieldGame {
         let px0 = (self.paddle_x as usize).clamp(2, w.saturating_sub(self.paddle_w + 3));
         let px1 = (px0 + self.paddle_w - 1).min(w - 3);
 
-        self.solver.boundary.set_moving_rect(px0, px1, py0, py1, self.paddle_vx, 0.0);
+        self.solver
+            .boundary
+            .set_moving_rect(px0, px1, py0, py1, self.paddle_vx, 0.0);
     }
 
     /// Move player paddle horizontally by `dx` cells.
@@ -302,14 +575,85 @@ impl BreakoutFieldGame {
         self.ball_vx = launch_vx;
         self.ball_vy = launch_vy;
 
-        // Excite acoustic launch wake
-        let impulse = GaussianImpulse::new(self.ball_x, self.ball_y, 2.4, 1.4);
+        if self.wave_force_enabled {
+            let impulse = GaussianImpulse::new(self.ball_x, self.ball_y, 2.4, 1.4);
+            impulse.inject(&mut self.solver.state);
+        }
+    }
+
+    /// Toggle counterfactual field coupling (sonic blast, wave radiation & Bohmian force, acoustic cleaving).
+    pub fn toggle_wave_force(&mut self) {
+        self.wave_force_enabled = !self.wave_force_enabled;
+    }
+
+    /// Cycle through perceptual field view modes (`[V]`).
+    pub fn cycle_view_mode(&mut self) {
+        self.view_mode = self.view_mode.next();
+    }
+
+    /// Save a complete situation branch checkpoint (`[B]`).
+    pub fn save_branch_checkpoint(&mut self) {
+        self.saved_branch = Some(GameBranchSnapshot {
+            checkpoint: Checkpoint::capture(&self.solver),
+            bricks: self.bricks.clone(),
+            bricks_remaining: self.bricks_remaining,
+            paddle_x: self.paddle_x,
+            paddle_vx: self.paddle_vx,
+            ball_x: self.ball_x,
+            ball_y: self.ball_y,
+            ball_vx: self.ball_vx,
+            ball_vy: self.ball_vy,
+            ball_attached: self.ball_attached,
+            lives: self.lives,
+            score: self.score,
+            combo: self.combo,
+        });
+    }
+
+    /// Restore a saved situation branch checkpoint (`[U]`) to compare counterfactual outcomes.
+    pub fn restore_branch_checkpoint(&mut self) -> bool {
+        if let Some(branch) = &self.saved_branch {
+            if let Ok(restored_solver) = branch.checkpoint.restore() {
+                self.solver = restored_solver;
+                self.bricks = branch.bricks.clone();
+                self.bricks_remaining = branch.bricks_remaining;
+                self.paddle_x = branch.paddle_x;
+                self.paddle_vx = branch.paddle_vx;
+                self.ball_x = branch.ball_x;
+                self.ball_y = branch.ball_y;
+                self.ball_vx = branch.ball_vx;
+                self.ball_vy = branch.ball_vy;
+                self.ball_attached = branch.ball_attached;
+                self.lives = branch.lives;
+                self.score = branch.score;
+                self.combo = branch.combo;
+                self.in_play = true;
+                self.field_energy =
+                    FieldEnergy::compute(&self.solver.state, &self.solver.material);
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Interactive mouse utterance: inject an acoustic pressure disturbance at `(gx, gy)`.
+    pub fn inject_mouse_impulse(&mut self, gx: f32, gy: f32, amplitude: f32) {
+        let cx = gx.clamp(3.0, (self.width.saturating_sub(4)) as f32);
+        let cy = gy.clamp(3.0, (self.height.saturating_sub(4)) as f32);
+        let impulse = GaussianImpulse::new(cx, cy, 2.5, amplitude);
         impulse.inject(&mut self.solver.state);
     }
 
-    /// Toggle acoustic radiation pressure coupling on/off.
-    pub fn toggle_wave_force(&mut self) {
-        self.wave_force_enabled = !self.wave_force_enabled;
+    /// Interactive mouse utterance: paint a localized high-impedance acoustic reflector lens at `(gx, gy)`.
+    pub fn paint_acoustic_reflector(&mut self, gx: usize, gy: usize) {
+        let x0 = gx.clamp(3, self.width.saturating_sub(5));
+        let y0 = gy.clamp(3, self.paddle_y.saturating_sub(4));
+        self.solver
+            .material
+            .set_cohesive_region(x0, x0 + 2, y0, y0 + 2, 2.2, 1.75, 0.002, 0.9, 3.0);
+        self.solver
+            .boundary
+            .set_moving_rect(x0, x0 + 1, y0, y0 + 1, 0.0, 0.0);
     }
 
     /// Advance game physics and Dzog field substeps.
@@ -331,29 +675,24 @@ impl BreakoutFieldGame {
                 break;
             }
 
-            // 1. Acoustic radiation pressure gradient force coupling:
-            // The ball is physically accelerated by -grad(p) from acoustic shockwaves and sonic bursts!
+            // 1. Acoustic radiation pressure (-grad p) + Bohmian Quantum Potential (-grad Q) coupling:
             if self.wave_force_enabled {
                 let bx_round = self.ball_x.round() as isize;
                 let by_round = self.ball_y.round() as isize;
-                if bx_round >= 1
-                    && bx_round < (self.width as isize - 1)
-                    && by_round >= 1
-                    && by_round < (self.height as isize - 1)
+                if bx_round >= 2
+                    && bx_round < (self.width as isize - 2)
+                    && by_round >= 2
+                    && by_round < (self.height as isize - 2)
                 {
                     let x = bx_round as usize;
                     let y = by_round as usize;
-                    let p_east = self.solver.state.pressure[self.solver.state.config.index(x + 1, y)];
-                    let p_west = self.solver.state.pressure[self.solver.state.config.index(x - 1, y)];
-                    let p_north = self.solver.state.pressure[self.solver.state.config.index(x, y + 1)];
-                    let p_south = self.solver.state.pressure[self.solver.state.config.index(x, y - 1)];
-
-                    let grad_x = (p_east - p_west) * 0.5;
-                    let grad_y = (p_north - p_south) * 0.5;
+                    let (grad_x, grad_y) = self.solver.state.pressure_gradient_at(x, y);
+                    let (q_fx, q_fy) = self.solver.state.quantum_force_at(x, y);
 
                     let k_acoustic = 0.035;
-                    self.ball_vx -= grad_x * k_acoustic * dt_sub;
-                    self.ball_vy -= grad_y * k_acoustic * dt_sub;
+                    let k_bohmian = 0.004;
+                    self.ball_vx += (-grad_x * k_acoustic + q_fx * k_bohmian) * dt_sub;
+                    self.ball_vy += (-grad_y * k_acoustic + q_fy * k_bohmian) * dt_sub;
                 }
             }
 
@@ -365,16 +704,20 @@ impl BreakoutFieldGame {
             if self.ball_x - self.ball_radius <= 2.0 {
                 self.ball_x = 2.0 + self.ball_radius;
                 self.ball_vx = self.ball_vx.abs();
-                let impact = GaussianImpulse::new(2.0, self.ball_y, 2.0, 1.2);
-                impact.inject(&mut self.solver.state);
+                if self.wave_force_enabled {
+                    let impact = GaussianImpulse::new(2.0, self.ball_y, 2.0, 1.2);
+                    impact.inject(&mut self.solver.state);
+                }
                 if event == StepEvent::None {
                     event = StepEvent::WallHit;
                 }
             } else if self.ball_x + self.ball_radius >= w - 3.0 {
                 self.ball_x = w - 3.0 - self.ball_radius;
                 self.ball_vx = -self.ball_vx.abs();
-                let impact = GaussianImpulse::new(w - 3.0, self.ball_y, 2.0, 1.2);
-                impact.inject(&mut self.solver.state);
+                if self.wave_force_enabled {
+                    let impact = GaussianImpulse::new(w - 3.0, self.ball_y, 2.0, 1.2);
+                    impact.inject(&mut self.solver.state);
+                }
                 if event == StepEvent::None {
                     event = StepEvent::WallHit;
                 }
@@ -383,8 +726,10 @@ impl BreakoutFieldGame {
             if self.ball_y - self.ball_radius <= 2.0 {
                 self.ball_y = 2.0 + self.ball_radius;
                 self.ball_vy = self.ball_vy.abs();
-                let impact = GaussianImpulse::new(self.ball_x, 2.0, 2.2, 1.4);
-                impact.inject(&mut self.solver.state);
+                if self.wave_force_enabled {
+                    let impact = GaussianImpulse::new(self.ball_x, 2.0, 2.2, 1.4);
+                    impact.inject(&mut self.solver.state);
+                }
                 if event == StepEvent::None {
                     event = StepEvent::WallHit;
                 }
@@ -411,7 +756,7 @@ impl BreakoutFieldGame {
 
                 // Speed normalization: increases slightly as bricks are cleared
                 let speed = (self.ball_vx * self.ball_vx + self.ball_vy * self.ball_vy).sqrt();
-                let cleared_factor = (32 - self.bricks_remaining) as f32 * 0.007;
+                let cleared_factor = (32usize.saturating_sub(self.bricks_remaining)) as f32 * 0.007;
                 let target_speed = (0.72 + cleared_factor).clamp(0.72, 0.95);
                 if speed > 0.001 {
                     self.ball_vx = (self.ball_vx / speed) * target_speed;
@@ -422,12 +767,14 @@ impl BreakoutFieldGame {
                 }
 
                 self.combo = 0; // Reset combo on paddle return
-                let impact = GaussianImpulse::new(self.ball_x, py, 2.6, 2.0);
-                impact.inject(&mut self.solver.state);
+                if self.wave_force_enabled {
+                    let impact = GaussianImpulse::new(self.ball_x, py, 2.6, 2.0);
+                    impact.inject(&mut self.solver.state);
+                }
                 event = StepEvent::PaddleHit;
             }
 
-            // 5. Breakable Bricks Collision (2-Hit Mechanics!)
+            // 5. Breakable Bricks Collision (Point-of-Impact Fracturing & Cavitation Rupture)
             let mut hit_idx = None;
             let mut hit_normal = (0.0f32, 0.0f32);
             let mut contact_pt = (0.0f32, 0.0f32);
@@ -466,6 +813,12 @@ impl BreakoutFieldGame {
                 let (hits_left, row, b_copy) = {
                     let brick = &mut self.bricks[idx];
                     brick.hits_left = brick.hits_left.saturating_sub(1);
+                    brick.apply_contact_fracture(
+                        contact_pt.0,
+                        contact_pt.1,
+                        hit_normal.0,
+                        hit_normal.1,
+                    );
                     (brick.hits_left, brick.row, *brick)
                 };
                 self.combo += 1;
@@ -483,30 +836,32 @@ impl BreakoutFieldGame {
                 let row_mult = (4 - row as u32).max(1);
 
                 if hits_left == 1 {
-                    // HIT 1: CRACKED!
-                    // Injects an acoustic fracture pulse into the Yee lattice
+                    // HIT 1: POINT-OF-IMPACT STRUCTURAL FRACTURE!
+                    // Opens semi-permeable fracture channels through the brick on the Yee lattice
                     self.score += 50 * row_mult * self.combo;
-                    let stress_pulse = GaussianImpulse::new(contact_pt.0, contact_pt.1, 2.4, 2.2);
-                    stress_pulse.inject(&mut self.solver.state);
+                    self.sync_single_brick_to_lattice(&b_copy);
+
+                    if self.wave_force_enabled {
+                        let stress_pulse =
+                            GaussianImpulse::new(contact_pt.0, contact_pt.1, 2.4, 2.2);
+                        stress_pulse.inject(&mut self.solver.state);
+                    }
                     event = StepEvent::BrickCracked {
                         brick_idx: idx,
                         row,
                     };
                 } else {
                     // HIT 2: PHYSICALLY SHATTERED!
-                    // Removes brick boundary from Yee lattice + Acoustic Cavitation Rupture
                     self.score += 150 * row_mult * self.combo;
                     self.bricks_remaining = self.bricks_remaining.saturating_sub(1);
 
-                    // Clear boundary so sound waves and ball pass right through!
+                    // Clear boundary & relax material so sound waves and ball pass right through!
                     self.clear_brick_boundary(&b_copy);
 
-                    // Massive acoustic blast shockwave
-                    let blast = GaussianImpulse::new(contact_pt.0, contact_pt.1, 3.6, 4.0);
-                    blast.inject(&mut self.solver.state);
-
-                    // Sonic blast force pushes the ball away from the cavitation center
+                    // Gate BOTH the explosive cavitation shockwave and momentum boost behind wave_force_enabled
                     if self.wave_force_enabled {
+                        let blast = GaussianImpulse::new(contact_pt.0, contact_pt.1, 3.6, 4.0);
+                        blast.inject(&mut self.solver.state);
                         self.ball_vx += hit_normal.0 * 0.22;
                         self.ball_vy += hit_normal.1 * 0.22;
                     }
@@ -524,9 +879,10 @@ impl BreakoutFieldGame {
                 self.lives = self.lives.saturating_sub(1);
                 self.combo = 0;
 
-                // Low-frequency drain shockwave
-                let drain_impulse = GaussianImpulse::new(self.ball_x, h - 2.0, 4.0, -1.8);
-                drain_impulse.inject(&mut self.solver.state);
+                if self.wave_force_enabled {
+                    let drain_impulse = GaussianImpulse::new(self.ball_x, h - 2.0, 4.0, -1.8);
+                    drain_impulse.inject(&mut self.solver.state);
+                }
 
                 if self.lives > 0 {
                     self.ball_attached = true;
@@ -548,8 +904,10 @@ impl BreakoutFieldGame {
             if self.bricks_remaining == 0 {
                 self.in_play = false;
                 event = StepEvent::Victory;
-                let win_impulse = GaussianImpulse::new(w / 2.0, h / 2.0, 5.0, 3.0);
-                win_impulse.inject(&mut self.solver.state);
+                if self.wave_force_enabled {
+                    let win_impulse = GaussianImpulse::new(w / 2.0, h / 2.0, 5.0, 3.0);
+                    win_impulse.inject(&mut self.solver.state);
+                }
                 break;
             }
         }
@@ -557,14 +915,24 @@ impl BreakoutFieldGame {
         // Dissipate paddle movement velocity
         self.paddle_vx *= 0.85;
 
-        // Ball wake excitation
-        if !self.ball_attached && self.in_play {
+        // Ball wake excitation (only when field coupling is active)
+        if !self.ball_attached && self.in_play && self.wave_force_enabled {
             let wake = GaussianImpulse::new(self.ball_x, self.ball_y, 1.4, 0.35);
             wake.inject(&mut self.solver.state);
         }
 
         // Advance Dzog FDTD field simulation
         self.solver.advance_macro();
+
+        // 8. Acoustic Wave-Induced Cleaving (Resonance Destruction!)
+        // Constructive interference of shockwaves shatters already-weakened bricks without ball contact.
+        if self.wave_force_enabled && self.in_play {
+            if let Some(cleave_event) = self.check_acoustic_wave_cleaving() {
+                if event == StepEvent::None {
+                    event = cleave_event;
+                }
+            }
+        }
 
         // Hamiltonian energy accounting
         self.field_energy = FieldEnergy::compute(&self.solver.state, &self.solver.material);
@@ -574,6 +942,88 @@ impl BreakoutFieldGame {
         }
 
         event
+    }
+
+    /// Inspect weakened bricks (`hits_left == 1`) for constructive acoustic pressure spikes
+    /// exceeding their material `cleave_pressure` threshold.
+    fn check_acoustic_wave_cleaving(&mut self) -> Option<StepEvent> {
+        let w = self.width;
+        let h = self.height;
+        let mut cleaved_indices = Vec::new();
+
+        for (idx, b) in self.bricks.iter().enumerate() {
+            if b.hits_left != 1 {
+                continue;
+            }
+
+            // Ensure the ball is not currently inside the brick's immediate collision halo
+            // so normal ball hits are handled by kinematic contact, while distant wave spikes cleave!
+            let b_cx = b.x as f32 + b.w as f32 * 0.5;
+            let b_cy = b.y as f32 + b.h as f32 * 0.5;
+            let dist_ball_sq = (self.ball_x - b_cx).powi(2) + (self.ball_y - b_cy).powi(2);
+            if !self.ball_attached && dist_ball_sq < (b.w as f32 * 0.65).powi(2) {
+                continue;
+            }
+
+            let p_crit = b.material_spec().cleave_pressure;
+            let mut max_p = 0.0f32;
+
+            let x0 = b.x.saturating_sub(1);
+            let x1 = (b.x + b.w).min(w - 1);
+            let y0 = b.y.saturating_sub(1);
+            let y1 = (b.y + b.h).min(h - 1);
+
+            for y in y0..=y1 {
+                for x in x0..=x1 {
+                    let cell_idx = self.solver.state.config.index(x, y);
+                    let p_abs = self.solver.state.pressure[cell_idx].abs();
+                    if p_abs > max_p {
+                        max_p = p_abs;
+                    }
+                }
+            }
+
+            if max_p >= p_crit {
+                cleaved_indices.push(idx);
+            }
+        }
+
+        let mut last_event = None;
+        for idx in cleaved_indices {
+            let b_copy = {
+                let brick = &mut self.bricks[idx];
+                brick.hits_left = 0;
+                brick.damage = [[1.0; 12]; 4];
+                *brick
+            };
+            self.bricks_remaining = self.bricks_remaining.saturating_sub(1);
+            self.acoustic_cleaves += 1;
+            self.combo += 1;
+            let row_mult = (4 - b_copy.row as u32).max(1);
+            self.score += 200 * row_mult * self.combo;
+
+            self.clear_brick_boundary(&b_copy);
+
+            // Secondary resonant cavitation burst (enables chain-reaction domino cleaving)
+            let cx = b_copy.x as f32 + b_copy.w as f32 * 0.5;
+            let cy = b_copy.y as f32 + b_copy.h as f32 * 0.5;
+            let resonant_burst = GaussianImpulse::new(cx, cy, 3.0, 2.8);
+            resonant_burst.inject(&mut self.solver.state);
+
+            if self.bricks_remaining == 0 {
+                self.in_play = false;
+                last_event = Some(StepEvent::Victory);
+                break;
+            } else {
+                last_event = Some(StepEvent::BrickBroken {
+                    brick_idx: idx,
+                    row: b_copy.row,
+                    remaining: self.bricks_remaining,
+                });
+            }
+        }
+
+        last_event
     }
 
     /// Rasterize the 2D acoustic field, breakable bricks, paddle, and ball directly into RGBA8.
@@ -635,8 +1085,18 @@ impl BreakoutFieldGame {
                     }
                     self.pixel_buffer[px_idx + 3] = 255;
                 } else if let Some(brick) = self.find_brick_at(x, y) {
-                    // Breakable brick rasterization
-                    let (r, g, b) = Self::brick_pixel_color(brick, x, y);
+                    let p_local = self.solver.state.pressure[idx];
+                    let (r, g, b) = match self.view_mode {
+                        FieldViewMode::ImpedanceAndCohesion => {
+                            let z = self.solver.material.impedance_at(x, y);
+                            let c = self.solver.material.cohesion[idx].clamp(0.0, 1.0);
+                            let r = (z * 95.0).clamp(40.0, 255.0) as u8;
+                            let g = (c * 210.0) as u8;
+                            let b_col = ((1.0 - c) * 250.0) as u8;
+                            (r, g, b_col)
+                        }
+                        _ => Self::brick_pixel_color(brick, x, y, p_local),
+                    };
                     self.pixel_buffer[px_idx] = r;
                     self.pixel_buffer[px_idx + 1] = g;
                     self.pixel_buffer[px_idx + 2] = b;
@@ -667,69 +1127,107 @@ impl BreakoutFieldGame {
                     }
                     self.pixel_buffer[px_idx + 3] = 255;
                 } else {
-                    // Live Dzog acoustic field wave visualization
-                    let p = self.solver.state.pressure[idx];
-                    let vx = self.solver.state.vx[idx];
-                    let vy = self.solver.state.vy[idx];
-                    let v_mag = (vx * vx + vy * vy).sqrt();
-
-                    if p.abs() > 0.015 || v_mag > 0.015 {
-                        if p > 0.0 {
-                            // Compression: warm amber shockwave glow
-                            let t = (p * 1.3).clamp(0.0, 1.0);
-                            let r = (12.0 + t * 240.0) as u8;
-                            let g = (14.0 + t * 165.0) as u8;
-                            let b = (22.0 + t * 45.0) as u8;
-                            self.pixel_buffer[px_idx] = r;
-                            self.pixel_buffer[px_idx + 1] = g;
-                            self.pixel_buffer[px_idx + 2] = b;
-                        } else {
-                            // Rarefaction: cool electric cyan ripple
-                            let t = (-p * 1.3).clamp(0.0, 1.0);
-                            let r = (10.0 + t * 25.0) as u8;
-                            let g = (16.0 + t * 180.0) as u8;
-                            let b = (24.0 + t * 230.0) as u8;
-                            self.pixel_buffer[px_idx] = r;
-                            self.pixel_buffer[px_idx + 1] = g;
-                            self.pixel_buffer[px_idx + 2] = b;
-                        }
-
-                        // Add kinetic velocity shimmer
-                        if v_mag > 0.03 {
-                            let vt = (v_mag * 0.7).clamp(0.0, 0.4);
-                            self.pixel_buffer[px_idx] = self.pixel_buffer[px_idx]
-                                .saturating_add((vt * 70.0) as u8);
-                            self.pixel_buffer[px_idx + 1] = self.pixel_buffer[px_idx + 1]
-                                .saturating_add((vt * 110.0) as u8);
-                            self.pixel_buffer[px_idx + 2] = self.pixel_buffer[px_idx + 2]
-                                .saturating_add((vt * 170.0) as u8);
-                        }
-                    } else {
-                        // Deep retro CRT slate
-                        self.pixel_buffer[px_idx] = 12;
-                        self.pixel_buffer[px_idx + 1] = 14;
-                        self.pixel_buffer[px_idx + 2] = 22;
-                    }
+                    let (r, g, b) = self.field_pixel_color(x, y, idx);
+                    self.pixel_buffer[px_idx] = r;
+                    self.pixel_buffer[px_idx + 1] = g;
+                    self.pixel_buffer[px_idx + 2] = b;
                     self.pixel_buffer[px_idx + 3] = 255;
                 }
             }
         }
     }
 
-    #[inline]
-    fn find_brick_at(&self, x: usize, y: usize) -> Option<&Brick> {
-        self.bricks.iter().find(|b| {
-            b.is_alive() && x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h
-        })
+    /// Map evolving field quantities at `(x, y)` to RGB according to the active `FieldViewMode`.
+    fn field_pixel_color(&self, x: usize, y: usize, idx: usize) -> (u8, u8, u8) {
+        let p = self.solver.state.pressure[idx];
+        let vx = self.solver.state.vx[idx];
+        let vy = self.solver.state.vy[idx];
+        let v_mag = (vx * vx + vy * vy).sqrt();
+
+        // Highlight user-painted acoustic reflector walls
+        if self.solver.boundary.wall_east[idx] || self.solver.boundary.wall_north[idx] {
+            return (190, 225, 255);
+        }
+
+        match self.view_mode {
+            FieldViewMode::CompositeArcade => {
+                if p.abs() > 0.015 || v_mag > 0.015 {
+                    let (mut r, mut g, mut b) = if p > 0.0 {
+                        let t = (p * 1.3).clamp(0.0, 1.0);
+                        (
+                            (12.0 + t * 240.0) as u8,
+                            (14.0 + t * 165.0) as u8,
+                            (22.0 + t * 45.0) as u8,
+                        )
+                    } else {
+                        let t = (-p * 1.3).clamp(0.0, 1.0);
+                        (
+                            (10.0 + t * 25.0) as u8,
+                            (16.0 + t * 180.0) as u8,
+                            (24.0 + t * 230.0) as u8,
+                        )
+                    };
+
+                    if v_mag > 0.03 {
+                        let vt = (v_mag * 0.7).clamp(0.0, 0.4);
+                        r = r.saturating_add((vt * 70.0) as u8);
+                        g = g.saturating_add((vt * 110.0) as u8);
+                        b = b.saturating_add((vt * 170.0) as u8);
+                    }
+                    (r, g, b)
+                } else {
+                    (12, 14, 22)
+                }
+            }
+            FieldViewMode::PressureAndBohmian => {
+                let q = self.solver.state.quantum_potential_at(x, y);
+                let p_t = (p * 1.4).clamp(-1.0, 1.0);
+                let q_t = (q * 0.35).clamp(-1.0, 1.0);
+
+                let r = (18.0 + p_t.max(0.0) * 210.0 + (-q_t).max(0.0) * 160.0).clamp(0.0, 255.0)
+                    as u8;
+                let g = (18.0 + q_t.max(0.0) * 200.0 + p_t.abs() * 60.0).clamp(0.0, 255.0) as u8;
+                let b = (28.0 + (-p_t).max(0.0) * 215.0 + (-q_t).max(0.0) * 190.0)
+                    .clamp(0.0, 255.0) as u8;
+                (r, g, b)
+            }
+            FieldViewMode::VelocityAndFlux => {
+                let (ix, iy) = self.solver.state.energy_flux_at(x, y);
+                let flux_mag = (ix * ix + iy * iy).sqrt();
+                let vt = (v_mag * 2.2).clamp(0.0, 1.0);
+                let ft = (flux_mag * 2.5).clamp(0.0, 1.0);
+
+                let r = (10.0 + ft * 240.0) as u8;
+                let g = (16.0 + vt * 225.0) as u8;
+                let b = (24.0 + (vt * 140.0 + ft * 90.0).min(230.0)) as u8;
+                (r, g, b)
+            }
+            FieldViewMode::ImpedanceAndCohesion => {
+                let z = self.solver.material.impedance_at(x, y);
+                let gamma = self.solver.material.damping[idx];
+                let z_norm = ((z - 0.5) / 1.8).clamp(0.0, 1.0);
+                let r = (16.0 + z_norm * 160.0 + p.abs() * 70.0).clamp(0.0, 255.0) as u8;
+                let g = (22.0 + (1.0 - gamma * 12.0).clamp(0.0, 1.0) * 65.0) as u8;
+                let b = (38.0 + z_norm * 190.0) as u8;
+                (r, g, b)
+            }
+        }
     }
 
-    /// Color and crack texture computation for a brick pixel.
-    fn brick_pixel_color(b: &Brick, x: usize, y: usize) -> (u8, u8, u8) {
+    #[inline]
+    fn find_brick_at(&self, x: usize, y: usize) -> Option<&Brick> {
+        self.bricks
+            .iter()
+            .find(|b| b.is_alive() && x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h)
+    }
+
+    /// Color and dynamic point-of-impact fracture fissure computation for a brick pixel.
+    fn brick_pixel_color(b: &Brick, x: usize, y: usize, p_local: f32) -> (u8, u8, u8) {
         let (base_r, base_g, base_b): (u8, u8, u8) = match b.row {
-            0 => (235, 45, 75),  // Ruby Red
-            1 => (245, 160, 25), // Solar Gold
-            2 => (35, 215, 110), // Emerald Green
-            _ => (0, 210, 245),  // Electric Cyan
+            0 => (235, 45, 75),  // Row 0: Crystal Quartz (Ruby)
+            1 => (245, 160, 25), // Row 1: Basalt Anvil (Solar Gold)
+            2 => (35, 215, 110), // Row 2: Viscous Lens (Emerald)
+            _ => (0, 210, 245),  // Row 3: Sonic Resonator (Electric Cyan)
         };
 
         let is_top_edge = y == b.y;
@@ -737,43 +1235,52 @@ impl BreakoutFieldGame {
         let is_bot_edge = y == b.y + b.h - 1;
         let is_right_edge = x == b.x + b.w - 1;
 
-        if b.hits_left == 2 {
-            // Intact brick: bright 3D bevel edges
+        let rel_x = (x - b.x).min(11);
+        let rel_y = (y - b.y).min(3);
+        let cell_dmg = b.damage[rel_y][rel_x];
+
+        if b.hits_left == 2 && cell_dmg < 0.2 {
+            // Intact brick: bright 3D bevel edges + subtle acoustic shimmer when waves hit it
+            let wave_glow = (p_local.abs() * 35.0).clamp(0.0, 40.0) as u8;
             if is_top_edge || is_left_edge {
                 (
-                    base_r.saturating_add(45),
-                    base_g.saturating_add(45),
-                    base_b.saturating_add(45),
+                    base_r.saturating_add(45).saturating_add(wave_glow),
+                    base_g.saturating_add(45).saturating_add(wave_glow),
+                    base_b.saturating_add(45).saturating_add(wave_glow),
                 )
             } else if is_bot_edge || is_right_edge {
                 (
-                    base_r.saturating_sub(55),
-                    base_g.saturating_sub(55),
-                    base_b.saturating_sub(55),
+                    base_r.saturating_sub(55).saturating_add(wave_glow),
+                    base_g.saturating_sub(55).saturating_add(wave_glow),
+                    base_b.saturating_sub(55).saturating_add(wave_glow),
                 )
             } else {
-                (base_r, base_g, base_b)
+                (
+                    base_r.saturating_add(wave_glow),
+                    base_g.saturating_add(wave_glow),
+                    base_b.saturating_add(wave_glow),
+                )
             }
         } else {
-            // Hit 1: CRACKED / STRESSED BRICK!
-            // Shows fracture fissure veins running through the brick body
-            let rel_x = x - b.x;
-            let rel_y = y - b.y;
+            // Point-of-Impact Fractured Brick!
+            // Edge cells near the impact crater chip away into dark void
+            let is_edge = is_top_edge || is_left_edge || is_bot_edge || is_right_edge;
+            if is_edge && cell_dmg >= 0.85 {
+                // Chipped-away spall crater on the struck edge
+                return (18, 22, 34);
+            }
 
-            let is_crack = (rel_x == rel_y * 3 + 1)
-                || (rel_x == rel_y * 3 + 2)
-                || (rel_x + rel_y == 8)
-                || (rel_y == 2 && rel_x >= 4 && rel_x <= 8);
-
-            if is_crack {
-                // Incandescent stress fissure vein
-                (255, 240, 170)
+            if cell_dmg >= 0.60 {
+                // Incandescent fracture fissure vein radiating from contact point (pulses with acoustic pressure)
+                let pulse = (p_local.abs() * 60.0).clamp(0.0, 55.0) as u8;
+                (255, 225u8.saturating_add(pulse / 2), 140u8.saturating_add(pulse))
             } else {
-                // Stressed, darkened body with amber undertone
+                // Stressed, darkened body around the fracture veins
+                let stress_factor = 0.65 - 0.25 * cell_dmg;
                 (
-                    (base_r as f32 * 0.65) as u8,
-                    (base_g as f32 * 0.60) as u8,
-                    (base_b as f32 * 0.50) as u8,
+                    (base_r as f32 * stress_factor) as u8,
+                    (base_g as f32 * stress_factor * 0.92) as u8,
+                    (base_b as f32 * stress_factor * 0.85) as u8,
                 )
             }
         }

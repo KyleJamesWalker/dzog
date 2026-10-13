@@ -13,6 +13,12 @@ pub struct MaterialField {
     pub bulk_modulus: Vec<f32>,
     /// Dissipative loss rate gamma(x, y) >= 0 at cell centers.
     pub damping: Vec<f32>,
+    /// Continuous structural cohesion C(x, y) in [0.0, 1.0] (0.0 = ambient fluid, 1.0 = intact solid).
+    #[serde(default)]
+    pub cohesion: Vec<f32>,
+    /// Critical acoustic pressure threshold |p| above which overpressure erodes cohesion.
+    #[serde(default)]
+    pub yield_pressure: Vec<f32>,
 }
 
 impl MaterialField {
@@ -28,6 +34,8 @@ impl MaterialField {
             density: vec![rho; count],
             bulk_modulus: vec![bulk_modulus; count],
             damping: vec![gamma; count],
+            cohesion: vec![0.0; count],
+            yield_pressure: vec![f32::INFINITY; count],
         }
     }
 
@@ -130,6 +138,37 @@ impl MaterialField {
         }
     }
 
+    /// Paint a structured material region with explicit cohesion C in [0, 1] and yield pressure.
+    #[allow(clippy::too_many_arguments)]
+    pub fn set_cohesive_region(
+        &mut self,
+        x_min: usize,
+        x_max: usize,
+        y_min: usize,
+        y_max: usize,
+        rho: f32,
+        k: f32,
+        gamma: f32,
+        cohesion: f32,
+        yield_pressure: f32,
+    ) {
+        assert!(rho > 0.0 && k > 0.0 && gamma >= 0.0);
+        let x_end = x_max.min(self.config.width);
+        let y_end = y_max.min(self.config.height);
+        let c_clamped = cohesion.clamp(0.0, 1.0);
+
+        for y in y_min..y_end {
+            for x in x_min..x_end {
+                let idx = self.config.index(x, y);
+                self.density[idx] = rho;
+                self.bulk_modulus[idx] = k;
+                self.damping[idx] = gamma;
+                self.cohesion[idx] = c_clamped;
+                self.yield_pressure[idx] = yield_pressure;
+            }
+        }
+    }
+
     /// Apply an absorbing sponge boundary layer of thickness `sponge_cells`.
     /// Increases damping quadratically towards outer borders.
     pub fn apply_sponge_layer(&mut self, sponge_cells: usize, max_gamma: f32) {
@@ -160,6 +199,12 @@ impl MaterialField {
         let count = self.config.cell_count();
         if self.density.len() != count || self.bulk_modulus.len() != count || self.damping.len() != count {
             return Err("Material parameter array length mismatch".to_string());
+        }
+        if !self.cohesion.is_empty() && self.cohesion.len() != count {
+            return Err("Material cohesion array length mismatch".to_string());
+        }
+        if !self.yield_pressure.is_empty() && self.yield_pressure.len() != count {
+            return Err("Material yield_pressure array length mismatch".to_string());
         }
         for i in 0..count {
             let rho = self.density[i];

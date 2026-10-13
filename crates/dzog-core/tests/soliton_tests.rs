@@ -76,3 +76,66 @@ fn test_soliton_wall_reflection_rebound() {
     assert!(incident_peak > 0.5, "Incident soliton should pass probe");
     assert!(reflected_peak > 0.5, "Reflected soliton should pass probe on return rebound");
 }
+
+#[test]
+fn test_bohmian_quantum_potential_well_on_wavepacket() {
+    let grid = GridConfig::new(40, 40, 1.0, 1.0);
+    let mut state = AcousticState::new(grid);
+
+    // Inject a smooth Gaussian wave packet centered at (20, 20)
+    let impulse = GaussianImpulse::new(20.0, 20.0, 3.0, 2.0);
+    impulse.inject(&mut state);
+
+    // At the peak of a Gaussian envelope R(x,y), the curvature Laplacian(R) < 0,
+    // so the Bohmian Quantum Potential Q = -Laplacian(R)/R > 0 at the peak,
+    // while in the surrounding inflection ring Laplacian(R) > 0 => Q < 0.
+    let q_center = state.quantum_potential_at(20, 20);
+    let q_far = state.quantum_potential_at(5, 5);
+
+    assert!(
+        q_center > 0.1,
+        "Bohmian quantum potential at Gaussian peak must reflect local envelope curvature (got {q_center})"
+    );
+    assert!(
+        q_far.abs() < 1e-3,
+        "Quantum potential far from excitation should vanish (got {q_far})"
+    );
+
+    // Verify quantum guidance force is non-zero on the flank of the wave packet
+    let (fx, fy) = state.quantum_force_at(22, 20);
+    assert!(
+        fx.abs() > 0.01 && fy.abs() < 1e-5,
+        "Quantum force on +X flank should be directed along X symmetry axis (fx={fx}, fy={fy})"
+    );
+}
+
+#[test]
+fn test_cohesion_erosion_under_acoustic_overpressure() {
+    let grid = GridConfig::new(32, 16, 1.0, 1.0);
+    let mut state = AcousticState::new(grid);
+    let mut material = MaterialField::homogeneous(grid, 1.0, 1.0, 0.0);
+
+    // Paint a cohesive solid region at [14..18, 6..10] with yield_pressure = 0.8
+    material.set_cohesive_region(14, 18, 6, 10, 1.2, 1.2, 0.005, 1.0, 0.8);
+    let idx_target = grid.index(15, 8);
+    assert_eq!(material.cohesion[idx_target], 1.0);
+
+    // Inject high-amplitude pressure wave (p = 3.5 > 0.8 yield) over the region
+    let blast = GaussianImpulse::new(15.0, 8.0, 2.5, 3.5);
+    blast.inject(&mut state);
+
+    let boundary = BoundaryMask::new(grid, OuterBoundaryRule::RigidWall);
+    let dt = SolverConfig::compute_cfl_dt(&grid, &material, 0.7);
+    let config = SolverConfig::new(dt, 0.7, 1);
+    let mut solver = AcousticSolver::new(state, material, boundary, config).unwrap();
+
+    for _ in 0..8 {
+        solver.step();
+    }
+
+    let eroded_cohesion = solver.material.cohesion[idx_target];
+    assert!(
+        eroded_cohesion < 1.0,
+        "Overpressure exceeding yield threshold must erode material cohesion (got {eroded_cohesion})"
+    );
+}

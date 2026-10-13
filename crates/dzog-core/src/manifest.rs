@@ -100,6 +100,13 @@ impl Checkpoint {
             self.boundary.clone(),
             self.config,
         )?;
+        let count = solver.material.config.cell_count();
+        if solver.material.cohesion.is_empty() {
+            solver.material.cohesion = vec![0.0; count];
+        }
+        if solver.material.yield_pressure.is_empty() {
+            solver.material.yield_pressure = vec![f32::INFINITY; count];
+        }
         solver.current_step = self.step;
         solver.current_time = self.time;
         Ok(solver)

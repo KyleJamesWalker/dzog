@@ -216,6 +216,9 @@ impl AcousticSolver {
         // -------------------------------------------------------------
         // Pass 2: Staggered pressure integer-step update
         // -------------------------------------------------------------
+        let has_cohesion = self.material.cohesion.len() == w * h
+            && self.material.yield_pressure.len() == w * h;
+
         for y in 0..h {
             for x in 0..w {
                 let idx = self.state.config.index(x, y);
@@ -273,6 +276,17 @@ impl AcousticSolver {
                 };
 
                 self.state.pressure[idx] = p_new;
+
+                // Continuous cohesion erosion under acoustic overpressure
+                if has_cohesion {
+                    let c = self.material.cohesion[idx];
+                    let p_yield = self.material.yield_pressure[idx];
+                    if c > 0.0 && p_new.abs() > p_yield {
+                        let excess = p_new.abs() - p_yield;
+                        let new_c = (c - 0.35 * excess * dt).max(0.0);
+                        self.material.cohesion[idx] = new_c;
+                    }
+                }
             }
         }
 

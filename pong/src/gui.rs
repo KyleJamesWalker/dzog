@@ -6,6 +6,7 @@ use bevy::{
         render_asset::RenderAssetUsages,
         render_resource::{Extent3d, TextureDimension, TextureFormat},
     },
+    window::PrimaryWindow,
 };
 use crate::field_game::BreakoutFieldGame;
 
@@ -102,16 +103,16 @@ fn setup_scene(
         .with_children(|parent| {
             // Header & Score line
             parent.spawn((
-                Text::new("SCORE: 00000   |   LIVES: 3   |   BRICKS: 32/32   |   FIELD ENERGY: 0.0 mJ"),
-                TextFont { font_size: 19.0, ..default() },
+                Text::new("SCORE: 00000  |  LIVES: 3  |  BRICKS: 32/32  |  CLEAVES: 0  |  ENERGY: 0.0 mJ"),
+                TextFont { font_size: 18.0, ..default() },
                 TextColor(Color::srgb(0.9, 0.95, 1.0)),
                 ScoreText,
             ));
 
             // Controls & Status line
             parent.spawn((
-                Text::new("[A/D] Move  |  [Space] Launch Ball  |  [T] Blast Force: ON  |  [P] Pause  |  [R] Restart"),
-                TextFont { font_size: 13.5, ..default() },
+                Text::new("[A/D] Move | [Space] Launch | [T] Sonic Blast & Force: ON | [V] View | [B/U] Branch/Restore | [L/R Click] Wave/Wall"),
+                TextFont { font_size: 12.5, ..default() },
                 TextColor(Color::srgb(0.55, 0.8, 0.95)),
                 StatusText,
             ));
@@ -120,6 +121,8 @@ fn setup_scene(
 
 fn handle_input(
     keyboard: Res<ButtonInput<KeyCode>>,
+    mouse_buttons: Res<ButtonInput<MouseButton>>,
+    windows: Query<&Window, With<PrimaryWindow>>,
     mut game_res: ResMut<GameStateResource>,
 ) {
     let speed = 2.4;
@@ -141,9 +144,22 @@ fn handle_input(
         }
     }
 
-    // Toggle acoustic radiation pressure coupling
+    // Toggle counterfactual field coupling (sonic blast, wave force, acoustic cleaving)
     if keyboard.just_pressed(KeyCode::KeyT) {
         game_res.game.toggle_wave_force();
+    }
+
+    // Cycle perceptual field view mode
+    if keyboard.just_pressed(KeyCode::KeyV) {
+        game_res.game.cycle_view_mode();
+    }
+
+    // Save / restore counterfactual branch checkpoint
+    if keyboard.just_pressed(KeyCode::KeyB) {
+        game_res.game.save_branch_checkpoint();
+    }
+    if keyboard.just_pressed(KeyCode::KeyU) {
+        game_res.game.restore_branch_checkpoint();
     }
 
     // Pause toggle
@@ -154,6 +170,29 @@ fn handle_input(
     // Restart game
     if keyboard.just_pressed(KeyCode::KeyR) {
         game_res.game.reset_game();
+    }
+
+    // Interactive mouse field perturbation (Left-click = wave impulse, Right-click = acoustic reflector)
+    if mouse_buttons.just_pressed(MouseButton::Left) || mouse_buttons.pressed(MouseButton::Right) {
+        if let Ok(window) = windows.get_single() {
+            if let Some(cursor) = window.cursor_position() {
+                let win_w = window.width();
+                let win_h = window.height();
+                // Map window coordinates to the 960x580 canvas centered at (0, -15)
+                let canvas_x = cursor.x - (win_w - 960.0) * 0.5;
+                let canvas_y = cursor.y - ((win_h - 580.0) * 0.5 + 15.0);
+                if (0.0..=960.0).contains(&canvas_x) && (0.0..=580.0).contains(&canvas_y) {
+                    let gx = (canvas_x / 960.0) * game_res.game.width as f32;
+                    let gy = (canvas_y / 580.0) * game_res.game.height as f32;
+                    if mouse_buttons.just_pressed(MouseButton::Left) {
+                        game_res.game.inject_mouse_impulse(gx, gy, 2.6);
+                    }
+                    if mouse_buttons.pressed(MouseButton::Right) {
+                        game_res.game.paint_acoustic_reflector(gx as usize, gy as usize);
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -192,29 +231,31 @@ fn update_ui(
 
     for mut text in &mut score_query {
         text.0 = format!(
-            "SCORE: {:05}   |   LIVES: {}   |   BRICKS: {:02}/32   |   ENERGY: {:.1} mJ",
-            game.score, lives_str, game.bricks_remaining, energy_mj
+            "SCORE: {:05}  |  LIVES: {}  |  BRICKS: {:02}/32  |  CLEAVES: {}  |  ENERGY: {:.1} mJ",
+            game.score, lives_str, game.bricks_remaining, game.acoustic_cleaves, energy_mj
         );
     }
 
     for mut text in &mut status_query {
         let blast_str = if game.wave_force_enabled { "ON" } else { "OFF" };
-        let pause_str = if game_res.paused { "  [PAUSED]" } else { "" };
+        let view_str = game.view_mode.label();
+        let branch_str = if game.saved_branch.is_some() { "SAVED" } else { "NONE" };
+        let pause_str = if game_res.paused { " [PAUSED]" } else { "" };
 
         let action_hint = if !game.in_play {
             if game.bricks_remaining == 0 {
-                "  ★ VICTORY! ALL BRICKS CLEARED ★  [SPACE/R: REPLAY]"
+                "  ★ VICTORY! ★ [SPACE/R]"
             } else {
-                "  ☠ GAME OVER ☠  [SPACE/R: RESTART]"
+                "  ☠ GAME OVER ☠ [SPACE/R]"
             }
         } else if game.ball_attached {
-            "  >>> [PRESS SPACE TO LAUNCH] <<<"
+            "  >>> [SPACE TO LAUNCH] <<<"
         } else {
             ""
         };
 
         text.0 = format!(
-            "[A/D / Left/Right] Move  |  [Space] Launch  |  [T] Wave Force: {blast_str}  |  [P] Pause  |  [R] Restart{pause_str}{action_hint}"
+            "[A/D] Move | [T] Sonic Blast & Force: {blast_str} | [V] View: {view_str} | [B/U] Branch({branch_str}) | [P] Pause | [R] Reset{pause_str}{action_hint}"
         );
     }
 }

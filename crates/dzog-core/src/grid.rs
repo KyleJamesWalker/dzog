@@ -103,4 +103,81 @@ impl AcousticState {
         }
         Ok(())
     }
+
+    /// Central-difference scalar pressure gradient grad(p) = (dp/dx, dp/dy) at interior cell (x, y).
+    #[inline]
+    pub fn pressure_gradient_at(&self, x: usize, y: usize) -> (f32, f32) {
+        let w = self.config.width;
+        let h = self.config.height;
+        if x == 0 || x + 1 >= w || y == 0 || y + 1 >= h {
+            return (0.0, 0.0);
+        }
+        let p_e = self.pressure[self.config.index(x + 1, y)];
+        let p_w = self.pressure[self.config.index(x - 1, y)];
+        let p_n = self.pressure[self.config.index(x, y + 1)];
+        let p_s = self.pressure[self.config.index(x, y - 1)];
+
+        let gx = (p_e - p_w) / (2.0 * self.config.dx);
+        let gy = (p_n - p_s) / (2.0 * self.config.dy);
+        (gx, gy)
+    }
+
+    /// Regularized field amplitude envelope R(x, y) = sqrt(p^2 + eps^2).
+    #[inline]
+    pub fn envelope_at(&self, x: usize, y: usize, eps: f32) -> f32 {
+        let p = self.pressure[self.config.index(x, y)];
+        (p * p + eps * eps).sqrt()
+    }
+
+    /// Bohm-Hiley Quantum Potential Q(x, y) = - (Laplacian R) / R at interior cell (x, y).
+    ///
+    /// Operationalizes Bohm-Hiley active information (`philosophy.md`):
+    /// Q depends on the spatial curvature (form) of the wave envelope rather than raw amplitude.
+    /// Regions of constructive wave focusing produce negative Q wells (attracting wave-guided trajectories).
+    #[inline]
+    pub fn quantum_potential_at(&self, x: usize, y: usize) -> f32 {
+        let w = self.config.width;
+        let h = self.config.height;
+        if x == 0 || x + 1 >= w || y == 0 || y + 1 >= h {
+            return 0.0;
+        }
+        let eps = 0.08f32;
+        let r_c = self.envelope_at(x, y, eps);
+        let r_e = self.envelope_at(x + 1, y, eps);
+        let r_w = self.envelope_at(x - 1, y, eps);
+        let r_n = self.envelope_at(x, y + 1, eps);
+        let r_s = self.envelope_at(x, y - 1, eps);
+
+        let inv_dx2 = 1.0 / (self.config.dx * self.config.dx);
+        let inv_dy2 = 1.0 / (self.config.dy * self.config.dy);
+        let lap_r = (r_e - 2.0 * r_c + r_w) * inv_dx2 + (r_n - 2.0 * r_c + r_s) * inv_dy2;
+        -lap_r / r_c
+    }
+
+    /// Spatial gradient of the Bohmian Quantum Potential grad(Q) = (dQ/dx, dQ/dy).
+    /// The associated Bohmian guidance force is F_Q = -grad(Q).
+    #[inline]
+    pub fn quantum_force_at(&self, x: usize, y: usize) -> (f32, f32) {
+        let w = self.config.width;
+        let h = self.config.height;
+        if x < 2 || x + 2 >= w || y < 2 || y + 2 >= h {
+            return (0.0, 0.0);
+        }
+        let q_e = self.quantum_potential_at(x + 1, y);
+        let q_w = self.quantum_potential_at(x - 1, y);
+        let q_n = self.quantum_potential_at(x, y + 1);
+        let q_s = self.quantum_potential_at(x, y - 1);
+
+        let dqx = (q_e - q_w) / (2.0 * self.config.dx);
+        let dqy = (q_n - q_s) / (2.0 * self.config.dy);
+        (-dqx, -dqy)
+    }
+
+    /// Instantaneous acoustic energy flux (Poynting vector) I = p * v at cell (x, y).
+    #[inline]
+    pub fn energy_flux_at(&self, x: usize, y: usize) -> (f32, f32) {
+        let idx = self.config.index(x, y);
+        let p = self.pressure[idx];
+        (p * self.vx[idx], p * self.vy[idx])
+    }
 }
