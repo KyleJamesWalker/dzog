@@ -35,6 +35,28 @@ pub struct GpuImpulseParams {
     pub dir_y: f32,
 }
 
+/// Compact GPU body/probe query descriptor (16 bytes).
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+pub struct GpuBodyQuery {
+    pub x: f32,
+    pub y: f32,
+    pub radius: f32,
+    pub yield_pressure: f32,
+}
+
+/// Compact GPU force, torque, overpressure, or point-probe reduction output (16 bytes).
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default, Pod, Zeroable)]
+pub struct GpuBodyReduction {
+    pub fx: f32,
+    pub fy: f32,
+    pub tau_z: f32,
+    pub max_pressure: f32,
+}
+
+pub const MAX_GPU_BODY_QUERIES: usize = 64;
+
 pub struct GpuSimulation {
     pub width: u32,
     pub height: u32,
@@ -56,10 +78,16 @@ pub struct GpuSimulation {
     pub velocity_pipeline: ComputePipeline,
     pub pressure_pipeline: ComputePipeline,
     pub impulse_pipeline: ComputePipeline,
+    pub reduce_pipeline: ComputePipeline,
 
     pub bind_group_velocity: BindGroup,
     pub bind_group_pressure: BindGroup,
     pub bind_group_impulse: BindGroup,
+    pub bind_group_reduce: BindGroup,
+
+    pub body_query_buffer: Buffer,
+    pub body_reduction_buffer: Buffer,
+    pub body_reduction_staging: Buffer,
 
     pub staging_buffer: Buffer,
 }
@@ -352,6 +380,106 @@ impl GpuSimulation {
             ],
         });
 
+        // Zero-readback GPU Body Force & Probe Reduction pipeline
+        let reduce_shader = ctx.device.create_shader_module(ShaderModuleDescriptor {
+            label: Some("Body Force & Probe Reduction Shader"),
+            source: ShaderSource::Wgsl(include_str!("shaders/reduce_body.wgsl").into()),
+        });
+
+        let body_buf_bytes = (MAX_GPU_BODY_QUERIES * std::mem::size_of::<GpuBodyQuery>()) as u64;
+        let body_query_buffer = ctx.device.create_buffer(&BufferDescriptor {
+            label: Some("Body Query Storage Buffer"),
+            size: body_buf_bytes,
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let body_reduction_buffer = ctx.device.create_buffer(&BufferDescriptor {
+            label: Some("Body Reduction Storage Buffer"),
+            size: body_buf_bytes,
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        let body_reduction_staging = ctx.device.create_buffer(&BufferDescriptor {
+            label: Some("Body Reduction Staging Buffer"),
+            size: body_buf_bytes,
+            usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        let reduce_bind_group_layout = ctx.device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("Body Reduction BindGroupLayout"),
+            entries: &[
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: false },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let reduce_pipeline_layout = ctx.device.create_pipeline_layout(&PipelineLayoutDescriptor {
+            label: Some("Body Reduction Pipeline Layout"),
+            bind_group_layouts: &[&reduce_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+
+        let reduce_pipeline = ctx.device.create_compute_pipeline(&ComputePipelineDescriptor {
+            label: Some("Body Reduction Pipeline"),
+            layout: Some(&reduce_pipeline_layout),
+            module: &reduce_shader,
+            entry_point: Some("main"),
+            compilation_options: PipelineCompilationOptions::default(),
+            cache: None,
+        });
+
+        let bind_group_reduce = ctx.device.create_bind_group(&BindGroupDescriptor {
+            label: Some("Body Reduction BindGroup"),
+            layout: &reduce_bind_group_layout,
+            entries: &[
+                BindGroupEntry { binding: 0, resource: params_buffer.as_entire_binding() },
+                BindGroupEntry { binding: 1, resource: BindingResource::TextureView(&view_a) },
+                BindGroupEntry { binding: 2, resource: body_query_buffer.as_entire_binding() },
+                BindGroupEntry { binding: 3, resource: body_reduction_buffer.as_entire_binding() },
+            ],
+        });
+
         // Staging buffer for readback
         let bytes_per_row = (w * 16 + 255) & !255; // WGPU row alignment: 256 bytes
         let staging_buffer = ctx.device.create_buffer(&BufferDescriptor {
@@ -378,9 +506,14 @@ impl GpuSimulation {
             velocity_pipeline,
             pressure_pipeline,
             impulse_pipeline,
+            reduce_pipeline,
             bind_group_velocity,
             bind_group_pressure,
             bind_group_impulse,
+            bind_group_reduce,
+            body_query_buffer,
+            body_reduction_buffer,
+            body_reduction_staging,
             staging_buffer,
         };
 
@@ -664,5 +797,84 @@ impl GpuSimulation {
 
         self.staging_buffer.unmap();
         state
+    }
+
+    /// Update the outer boundary rule dynamically (e.g. toggling Periodic vs AbsorbingSponge).
+    pub fn set_outer_rule(&mut self, ctx: &GpuContext, outer_rule: OuterBoundaryRule) {
+        self.params.outer_rule = match outer_rule {
+            OuterBoundaryRule::RigidWall => 0,
+            OuterBoundaryRule::AbsorbingSponge => 1,
+            OuterBoundaryRule::Periodic => 2,
+        };
+        ctx.queue
+            .write_buffer(&self.params_buffer, 0, bytemuck::bytes_of(&self.params));
+    }
+
+    /// Execute a zero-readback GPU Force, Torque, Fracture & Probe Reduction Pass.
+    ///
+    /// Evaluates net field forces `(fx, fy, tau_z)` and peak overpressure `max_pressure`
+    /// for up to `MAX_GPU_BODY_QUERIES` bodies/probes directly on the GPU, reading back
+    /// only the compact `16 * N` byte reduction array instead of the full field texture.
+    pub fn reduce_bodies_gpu(
+        &self,
+        ctx: &GpuContext,
+        queries: &[GpuBodyQuery],
+    ) -> Vec<GpuBodyReduction> {
+        let count = queries.len().min(MAX_GPU_BODY_QUERIES);
+        if count == 0 {
+            return Vec::new();
+        }
+
+        let mut padded = [GpuBodyQuery {
+            x: 0.0,
+            y: 0.0,
+            radius: 0.0,
+            yield_pressure: 0.0,
+        }; MAX_GPU_BODY_QUERIES];
+        padded[..count].copy_from_slice(&queries[..count]);
+
+        ctx.queue
+            .write_buffer(&self.body_query_buffer, 0, bytemuck::bytes_of(&padded));
+
+        let byte_len = (count * std::mem::size_of::<GpuBodyReduction>()) as u64;
+        let mut encoder = ctx.device.create_command_encoder(&CommandEncoderDescriptor {
+            label: Some("Body Reduction Encoder"),
+        });
+
+        {
+            let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+                label: Some("Body Force & Probe Reduction Pass"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.reduce_pipeline);
+            pass.set_bind_group(0, &self.bind_group_reduce, &[]);
+            pass.dispatch_workgroups(((count as u32) + 31) / 32, 1, 1);
+        }
+
+        encoder.copy_buffer_to_buffer(
+            &self.body_reduction_buffer,
+            0,
+            &self.body_reduction_staging,
+            0,
+            byte_len,
+        );
+
+        ctx.queue.submit(std::iter::once(encoder.finish()));
+
+        let slice = self.body_reduction_staging.slice(0..byte_len);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(MapMode::Read, move |res| {
+            tx.send(res).unwrap();
+        });
+        ctx.device.poll(Maintain::Wait);
+        rx.recv().unwrap().unwrap();
+
+        let out = {
+            let view = slice.get_mapped_range();
+            let items: &[GpuBodyReduction] = bytemuck::cast_slice(&view);
+            items.to_vec()
+        };
+        self.body_reduction_staging.unmap();
+        out
     }
 }

@@ -63,9 +63,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         if (params.outer_rule == 2u) {
             let coord_wrap = vec2<i32>(0, i32(y));
             let p_wrap = textureLoad(state_in, coord_wrap, 0).r;
+            let mat_wrap = textureLoad(material, coord_wrap, 0);
             let grad_p_x = (p_wrap - p_center) * params.inv_dx;
-            let rho_face = cur_mat.r;
-            let gamma_face = cur_mat.b;
+            let rho_face = 0.5 * (cur_mat.r + mat_wrap.r);
+            let gamma_face = 0.5 * (cur_mat.b + mat_wrap.b);
             let decay = exp(-gamma_face * params.dt);
             let accel = -grad_p_x / rho_face;
             vx_new = decay * cur_state.g + accel * params.dt;
@@ -97,9 +98,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         if (params.outer_rule == 2u) {
             let coord_wrap = vec2<i32>(i32(x), 0);
             let p_wrap = textureLoad(state_in, coord_wrap, 0).r;
+            let mat_wrap = textureLoad(material, coord_wrap, 0);
             let grad_p_y = (p_wrap - p_center) * params.inv_dy;
-            let rho_face = cur_mat.r;
-            let gamma_face = cur_mat.b;
+            let rho_face = 0.5 * (cur_mat.r + mat_wrap.r);
+            let gamma_face = 0.5 * (cur_mat.b + mat_wrap.b);
             let decay = exp(-gamma_face * params.dt);
             let accel = -grad_p_y / rho_face;
             vy_new = decay * cur_state.b + accel * params.dt;
@@ -110,12 +112,17 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     // --- Bohm-Hiley Quantum Potential Q = -Laplacian(R) / R ---
     var q_bohm = 0.0;
-    if (x > 0u && x + 1u < params.width && y > 0u && y + 1u < params.height) {
+    if (params.outer_rule == 2u || (x > 0u && x + 1u < params.width && y > 0u && y + 1u < params.height)) {
         let eps_sq = 0.0064; // (0.08)^2
-        let p_e = textureLoad(state_in, vec2<i32>(i32(x + 1u), i32(y)), 0).r;
-        let p_w = textureLoad(state_in, vec2<i32>(i32(x - 1u), i32(y)), 0).r;
-        let p_n = textureLoad(state_in, vec2<i32>(i32(x), i32(y + 1u)), 0).r;
-        let p_s = textureLoad(state_in, vec2<i32>(i32(x), i32(y - 1u)), 0).r;
+        let xe = i32((x + 1u) % params.width);
+        let xw = i32((x + params.width - 1u) % params.width);
+        let yn = i32((y + 1u) % params.height);
+        let ys = i32((y + params.height - 1u) % params.height);
+
+        let p_e = textureLoad(state_in, vec2<i32>(xe, i32(y)), 0).r;
+        let p_w = textureLoad(state_in, vec2<i32>(xw, i32(y)), 0).r;
+        let p_n = textureLoad(state_in, vec2<i32>(i32(x), yn), 0).r;
+        let p_s = textureLoad(state_in, vec2<i32>(i32(x), ys), 0).r;
 
         let r_c = sqrt(p_center * p_center + eps_sq);
         let r_e = sqrt(p_e * p_e + eps_sq);

@@ -1,0 +1,14 @@
+[package]
+name = "asteroids"
+version = "0.1.0"
+edition = "2021"
+description = "Field-First Crystalline Asteroids & Alien Ecology Demo on the Dzoglang PDE Lattice"
+
+[dependencies]
+dzog-core = { path = "../crates/dzog-core" }
+dzog-wgpu = { path = "../crates/dzog-wgpu" }
+pollster = { workspace = true }
+crossterm = { workspace = true }
+bevy = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }

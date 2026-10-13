@@ -92,3 +92,85 @@ fn test_gate1_gpu_cpu_numerical_agreement() {
         "GPU-native impulse shader must excite pressure and velocity on the GPU lattice (got {max_p_after})"
     );
 }
+
+#[test]
+fn test_periodic_wrap_agreement_and_zero_readback_body_reduction() {
+    let ctx = match pollster::block_on(GpuContext::init_headless()) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Skipping GPU periodic & reduction test (no compatible GPU adapter): {e}");
+            return;
+        }
+    };
+
+    let grid = GridConfig::new(32, 32, 1.0, 1.0);
+    let mut state = AcousticState::new(grid);
+    let material = MaterialField::homogeneous(grid, 1.0, 1.0, 0.01);
+    let boundary = BoundaryMask::new(grid, OuterBoundaryRule::Periodic);
+    let dt = SolverConfig::compute_cfl_dt(&grid, &material, 0.7);
+    let config = SolverConfig::new(dt, 0.7, 1);
+
+    // Inject a Gaussian impulse right on the periodic East/North seam (30.5, 30.5)
+    let impulse = GaussianImpulse::new(30.5, 30.5, 2.2, 2.0);
+    impulse.inject_wrapped(&mut state, true);
+
+    let mut cpu_solver = AcousticSolver::new(
+        state.clone(),
+        material.clone(),
+        boundary.clone(),
+        config,
+    )
+    .unwrap();
+
+    let gpu_sim = GpuSimulation::new(&ctx, &state, &material, &boundary, &config)
+        .expect("Failed to create GPU simulation");
+
+    let substeps = 12;
+    for _ in 0..substeps {
+        cpu_solver.step();
+    }
+    gpu_sim.step(&ctx, substeps);
+
+    let gpu_state = gpu_sim.readback_state(&ctx);
+    let mut max_p_diff = 0.0f32;
+    for i in 0..grid.cell_count() {
+        let diff = (cpu_solver.state.pressure[i] - gpu_state.pressure[i]).abs();
+        if diff > max_p_diff {
+            max_p_diff = diff;
+        }
+    }
+    assert!(
+        max_p_diff < 1e-4,
+        "Periodic toroidal GPU and CPU solvers must agree within 1e-4 across borders (got {max_p_diff})"
+    );
+
+    // Test zero-readback GPU body force & probe reduction pass
+    let queries = [
+        // Body centered at (2.0, 30.5) right across the periodic seam from the blast at (30.5, 30.5)
+        GpuBodyQuery {
+            x: 2.0,
+            y: 30.5,
+            radius: 3.5,
+            yield_pressure: 1.0,
+        },
+        // Point probe at (30.0, 30.0) (radius == 0.0)
+        GpuBodyQuery {
+            x: 30.0,
+            y: 30.0,
+            radius: 0.0,
+            yield_pressure: 0.0,
+        },
+    ];
+    let reductions = gpu_sim.reduce_bodies_gpu(&ctx, &queries);
+    assert_eq!(reductions.len(), 2);
+    assert!(
+        reductions[0].max_pressure > 0.05,
+        "Zero-readback GPU body reduction must detect blast pressure across periodic border (got {})",
+        reductions[0].max_pressure
+    );
+    let expected_probe_p = gpu_state.pressure[grid.index(30, 30)];
+    assert!(
+        (reductions[1].max_pressure - expected_probe_p).abs() < 1e-4,
+        "Point probe reduction must match cell pressure without full-texture readback"
+    );
+}

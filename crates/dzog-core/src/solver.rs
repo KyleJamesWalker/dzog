@@ -178,8 +178,8 @@ impl AcousticSolver {
                         OuterBoundaryRule::Periodic => {
                             let idx_wrap = self.state.config.index(0, y);
                             let grad_p = (self.state.pressure[idx_wrap] - self.state.pressure[idx]) * inv_dx;
-                            let rho_face = self.material.density[idx];
-                            let gamma_face = self.material.damping[idx];
+                            let rho_face = self.material.face_density_east_periodic(x, y);
+                            let gamma_face = self.material.face_damping_east_periodic(x, y);
                             let decay = fast_neg_exp(gamma_face * dt);
                             let accel = -grad_p / rho_face;
                             self.state.vx[idx] = decay * self.state.vx[idx] + accel * dt;
@@ -216,8 +216,8 @@ impl AcousticSolver {
                         OuterBoundaryRule::Periodic => {
                             let idx_wrap = self.state.config.index(x, 0);
                             let grad_p = (self.state.pressure[idx_wrap] - self.state.pressure[idx]) * inv_dy;
-                            let rho_face = self.material.density[idx];
-                            let gamma_face = self.material.damping[idx];
+                            let rho_face = self.material.face_density_north_periodic(x, y);
+                            let gamma_face = self.material.face_damping_north_periodic(x, y);
                             let decay = fast_neg_exp(gamma_face * dt);
                             let accel = -grad_p / rho_face;
                             self.state.vy[idx] = decay * self.state.vy[idx] + accel * dt;
@@ -323,5 +323,42 @@ impl AcousticSolver {
         for _ in 0..self.config.substeps_per_macro {
             self.step();
         }
+    }
+
+    /// Advect the dynamic field `(p, vx, vy)` by integer cell shifts `(shift_x, shift_y)`
+    /// for camera-centered open-space scrolling lattices. Newly exposed border cells are zeroed.
+    pub fn advect_lattice(&mut self, shift_x: isize, shift_y: isize) {
+        if shift_x == 0 && shift_y == 0 {
+            return;
+        }
+        let w = self.state.config.width;
+        let h = self.state.config.height;
+        let count = w * h;
+
+        let mut new_p = vec![0.0f32; count];
+        let mut new_vx = vec![0.0f32; count];
+        let mut new_vy = vec![0.0f32; count];
+
+        for y in 0..h {
+            let src_y = y as isize + shift_y;
+            if src_y < 0 || src_y >= h as isize {
+                continue;
+            }
+            for x in 0..w {
+                let src_x = x as isize + shift_x;
+                if src_x < 0 || src_x >= w as isize {
+                    continue;
+                }
+                let dst_idx = self.state.config.index(x, y);
+                let src_idx = self.state.config.index(src_x as usize, src_y as usize);
+                new_p[dst_idx] = self.state.pressure[src_idx];
+                new_vx[dst_idx] = self.state.vx[src_idx];
+                new_vy[dst_idx] = self.state.vy[src_idx];
+            }
+        }
+
+        self.state.pressure = new_p;
+        self.state.vx = new_vx;
+        self.state.vy = new_vy;
     }
 }

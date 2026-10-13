@@ -113,6 +113,38 @@ impl MaterialField {
         }
     }
 
+    /// Periodic East-face effective density between (x, y) and ((x + 1) % W, y).
+    #[inline]
+    pub fn face_density_east_periodic(&self, x: usize, y: usize) -> f32 {
+        let idx_l = self.config.index(x, y);
+        let idx_r = self.config.index((x + 1) % self.config.width, y);
+        0.5 * (self.density[idx_l] + self.density[idx_r])
+    }
+
+    /// Periodic North-face effective density between (x, y) and (x, (y + 1) % H).
+    #[inline]
+    pub fn face_density_north_periodic(&self, x: usize, y: usize) -> f32 {
+        let idx_b = self.config.index(x, y);
+        let idx_t = self.config.index(x, (y + 1) % self.config.height);
+        0.5 * (self.density[idx_b] + self.density[idx_t])
+    }
+
+    /// Periodic East-face damping loss factor between (x, y) and ((x + 1) % W, y).
+    #[inline]
+    pub fn face_damping_east_periodic(&self, x: usize, y: usize) -> f32 {
+        let idx_l = self.config.index(x, y);
+        let idx_r = self.config.index((x + 1) % self.config.width, y);
+        0.5 * (self.damping[idx_l] + self.damping[idx_r])
+    }
+
+    /// Periodic North-face damping loss factor between (x, y) and (x, (y + 1) % H).
+    #[inline]
+    pub fn face_damping_north_periodic(&self, x: usize, y: usize) -> f32 {
+        let idx_b = self.config.index(x, y);
+        let idx_t = self.config.index(x, (y + 1) % self.config.height);
+        0.5 * (self.damping[idx_b] + self.damping[idx_t])
+    }
+
     /// Paint a circular or rectangular material modification region.
     pub fn set_region(
         &mut self,

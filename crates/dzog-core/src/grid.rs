@@ -173,6 +173,78 @@ impl AcousticState {
         (-dqx, -dqy)
     }
 
+    /// Central-difference scalar pressure gradient with optional periodic wrapping.
+    #[inline]
+    pub fn pressure_gradient_wrapped_at(&self, x: usize, y: usize, periodic: bool) -> (f32, f32) {
+        if !periodic {
+            return self.pressure_gradient_at(x, y);
+        }
+        let w = self.config.width;
+        let h = self.config.height;
+        let xe = (x + 1) % w;
+        let xw = (x + w - 1) % w;
+        let yn = (y + 1) % h;
+        let ys = (y + h - 1) % h;
+
+        let p_e = self.pressure[self.config.index(xe, y)];
+        let p_w = self.pressure[self.config.index(xw, y)];
+        let p_n = self.pressure[self.config.index(x, yn)];
+        let p_s = self.pressure[self.config.index(x, ys)];
+
+        let gx = (p_e - p_w) / (2.0 * self.config.dx);
+        let gy = (p_n - p_s) / (2.0 * self.config.dy);
+        (gx, gy)
+    }
+
+    /// Bohm-Hiley Quantum Potential Q(x, y) = -(Laplacian R)/R with optional periodic wrapping.
+    #[inline]
+    pub fn quantum_potential_wrapped_at(&self, x: usize, y: usize, periodic: bool) -> f32 {
+        if !periodic {
+            return self.quantum_potential_at(x, y);
+        }
+        let w = self.config.width;
+        let h = self.config.height;
+        let xe = (x + 1) % w;
+        let xw = (x + w - 1) % w;
+        let yn = (y + 1) % h;
+        let ys = (y + h - 1) % h;
+
+        let eps = 0.08f32;
+        let r_c = self.envelope_at(x, y, eps);
+        let r_e = self.envelope_at(xe, y, eps);
+        let r_w = self.envelope_at(xw, y, eps);
+        let r_n = self.envelope_at(x, yn, eps);
+        let r_s = self.envelope_at(x, ys, eps);
+
+        let inv_dx2 = 1.0 / (self.config.dx * self.config.dx);
+        let inv_dy2 = 1.0 / (self.config.dy * self.config.dy);
+        let lap_r = (r_e - 2.0 * r_c + r_w) * inv_dx2 + (r_n - 2.0 * r_c + r_s) * inv_dy2;
+        -lap_r / r_c
+    }
+
+    /// Bohmian guidance force F_Q = -grad(Q) with optional periodic wrapping.
+    #[inline]
+    pub fn quantum_force_wrapped_at(&self, x: usize, y: usize, periodic: bool) -> (f32, f32) {
+        if !periodic {
+            return self.quantum_force_at(x, y);
+        }
+        let w = self.config.width;
+        let h = self.config.height;
+        let xe = (x + 1) % w;
+        let xw = (x + w - 1) % w;
+        let yn = (y + 1) % h;
+        let ys = (y + h - 1) % h;
+
+        let q_e = self.quantum_potential_wrapped_at(xe, y, true);
+        let q_w = self.quantum_potential_wrapped_at(xw, y, true);
+        let q_n = self.quantum_potential_wrapped_at(x, yn, true);
+        let q_s = self.quantum_potential_wrapped_at(x, ys, true);
+
+        let dqx = (q_e - q_w) / (2.0 * self.config.dx);
+        let dqy = (q_n - q_s) / (2.0 * self.config.dy);
+        (-dqx, -dqy)
+    }
+
     /// Instantaneous acoustic energy flux (Poynting vector) I = p * v at cell (x, y).
     #[inline]
     pub fn energy_flux_at(&self, x: usize, y: usize) -> (f32, f32) {

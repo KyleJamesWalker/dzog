@@ -6,4 +6,7 @@ pub mod simulation;
 
 pub use context::GpuContext;
 pub use renderer::GpuRenderer;
-pub use simulation::{GpuImpulseParams, GpuSimParams, GpuSimulation};
+pub use simulation::{
+    GpuBodyQuery, GpuBodyReduction, GpuImpulseParams, GpuSimParams, GpuSimulation,
+    MAX_GPU_BODY_QUERIES,
+};

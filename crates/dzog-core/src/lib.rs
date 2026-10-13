@@ -10,19 +10,28 @@
 //! - Field specification and checkpoint persistence via RON.
 
 pub mod audio;
+pub mod body;
 pub mod boundary;
 pub mod energy;
 pub mod excitation;
+pub mod gravity;
 pub mod grid;
 pub mod manifest;
 pub mod material;
 pub mod probe;
 pub mod solver;
 
-pub use audio::{resample_probe_to_audio, write_stereo_wav, AudioExportConfig};
+pub use audio::{
+    resample_probe_to_audio, write_stereo_wav, AudioExportConfig, BinauralCockpitSonifier,
+    FieldAcousticFrame, FieldModalSynthesizer,
+};
+pub use body::{BodyMaterialSpec, CohesiveBody, MineralClass};
 pub use boundary::{BoundaryMask, OuterBoundaryRule};
 pub use energy::FieldEnergy;
-pub use excitation::{DirectionalWavePacket, GaussianImpulse};
+pub use excitation::{
+    AntiphaseShieldPulse, DirectionalWavePacket, GaussianImpulse, ReactionThrusterPlume,
+};
+pub use gravity::{GravityField, GravityWell};
 pub use grid::{AcousticState, GridConfig};
 pub use manifest::{Checkpoint, FieldSpec, ProbeDef};
 pub use material::MaterialField;
