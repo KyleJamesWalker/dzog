@@ -1,4 +1,4 @@
-//! Bevy 0.15 GUI application and pixel shader display for Field-First Soliton Pong.
+//! Bevy 0.15 GUI application and retro pixel display for Field-First Breakout Pong.
 
 use bevy::{
     prelude::*,
@@ -7,12 +7,11 @@ use bevy::{
         render_resource::{Extent3d, TextureDimension, TextureFormat},
     },
 };
-use crate::field_game::SolitonFieldGame;
+use crate::field_game::BreakoutFieldGame;
 
 #[derive(Resource)]
 pub struct GameStateResource {
-    pub game: SolitonFieldGame,
-    pub ai_enabled: bool,
+    pub game: BreakoutFieldGame,
     pub paused: bool,
 }
 
@@ -29,15 +28,14 @@ pub fn launch_gui() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
-                title: "Dzoglang — Field-First Soliton Pong (Atari / C64 Engine)".into(),
+                title: "Dzoglang — Field-First Soliton Breakout (Acoustic PDE Engine)".into(),
                 resolution: (1024.0_f32, 640.0_f32).into(),
                 ..default()
             }),
             ..default()
         }))
         .insert_resource(GameStateResource {
-            game: SolitonFieldGame::new(128, 64),
-            ai_enabled: true,
+            game: BreakoutFieldGame::new(128, 80),
             paused: false,
         })
         .add_systems(Startup, setup_scene)
@@ -53,14 +51,13 @@ fn setup_scene(
     // 2D Camera
     commands.spawn(Camera2d);
 
-    // Initial serve
-    game_res.game.serve(2);
+    // Initial render
     game_res.game.render_to_pixel_buffer();
 
     let w = game_res.game.width as u32;
     let h = game_res.game.height as u32;
 
-    // Create dynamic pixel canvas image
+    // Create dynamic retro pixel canvas image
     let mut image = Image::new_fill(
         Extent3d {
             width: w,
@@ -72,7 +69,7 @@ fn setup_scene(
         TextureFormat::Rgba8UnormSrgb,
         RenderAssetUsages::default(),
     );
-    // Nearest-neighbor sampling for crisp retro pixels
+    // Nearest-neighbor sampling for crisp retro CRT pixels
     image.sampler = bevy::image::ImageSampler::nearest();
 
     let image_handle = images.add(image);
@@ -82,39 +79,40 @@ fn setup_scene(
     commands.spawn((
         Sprite {
             image: image_handle,
-            custom_size: Some(Vec2::new(960.0, 480.0)),
+            custom_size: Some(Vec2::new(960.0, 580.0)),
             ..default()
         },
-        Transform::from_xyz(0.0, -20.0, 0.0),
+        Transform::from_xyz(0.0, -15.0, 0.0),
     ));
 
-    // UI Overlay: Scoreboard & status
+    // UI Overlay: Scoreboard & status header
     commands
         .spawn((
             Node {
                 width: Val::Percent(100.0),
-                height: Val::Px(80.0),
-                justify_content: JustifyContent::SpaceBetween,
+                height: Val::Px(75.0),
+                flex_direction: FlexDirection::Column,
+                justify_content: JustifyContent::SpaceEvenly,
                 align_items: AlignItems::Center,
-                padding: UiRect::all(Val::Px(16.0)),
+                padding: UiRect::axes(Val::Px(16.0), Val::Px(8.0)),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.05, 0.06, 0.1, 0.85)),
+            BackgroundColor(Color::srgba(0.05, 0.06, 0.1, 0.90)),
         ))
         .with_children(|parent| {
-            // Header & Score
+            // Header & Score line
             parent.spawn((
-                Text::new("PLAYER 1: 00   |   DZOGLANG SOLITON FIELD   |   PLAYER 2: 00"),
-                TextFont { font_size: 20.0, ..default() },
+                Text::new("SCORE: 00000   |   LIVES: 3   |   BRICKS: 32/32   |   FIELD ENERGY: 0.0 mJ"),
+                TextFont { font_size: 19.0, ..default() },
                 TextColor(Color::srgb(0.9, 0.95, 1.0)),
                 ScoreText,
             ));
 
-            // Controls & Status
+            // Controls & Status line
             parent.spawn((
-                Text::new("[W/S] P1  |  [Up/Dn] P2  |  [A] AI: ON  |  [Space] Serve  |  [P] Pause"),
-                TextFont { font_size: 14.0, ..default() },
-                TextColor(Color::srgb(0.6, 0.8, 0.9)),
+                Text::new("[A/D] Move  |  [Space] Launch Ball  |  [T] Blast Force: ON  |  [P] Pause  |  [R] Restart"),
+                TextFont { font_size: 13.5, ..default() },
+                TextColor(Color::srgb(0.55, 0.8, 0.95)),
                 StatusText,
             ));
         });
@@ -124,34 +122,28 @@ fn handle_input(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut game_res: ResMut<GameStateResource>,
 ) {
-    // Player 1 controls
-    if keyboard.pressed(KeyCode::KeyW) {
-        game_res.game.move_p1(-2);
+    let speed = 2.4;
+
+    // Paddle movement
+    if keyboard.pressed(KeyCode::KeyA) || keyboard.pressed(KeyCode::ArrowLeft) {
+        game_res.game.move_paddle(-speed);
     }
-    if keyboard.pressed(KeyCode::KeyS) {
-        game_res.game.move_p1(2);
+    if keyboard.pressed(KeyCode::KeyD) || keyboard.pressed(KeyCode::ArrowRight) {
+        game_res.game.move_paddle(speed);
     }
 
-    // Player 2 controls (when AI is off)
-    if !game_res.ai_enabled {
-        if keyboard.pressed(KeyCode::ArrowUp) {
-            game_res.game.move_p2(-2);
-        }
-        if keyboard.pressed(KeyCode::ArrowDown) {
-            game_res.game.move_p2(2);
-        }
-    }
-
-    // AI toggle
-    if keyboard.just_pressed(KeyCode::KeyA) {
-        game_res.ai_enabled = !game_res.ai_enabled;
-    }
-
-    // Serve soliton
+    // Launch ball from paddle
     if keyboard.just_pressed(KeyCode::Space) {
-        if !game_res.game.in_play {
-            game_res.game.serve(2);
+        if game_res.game.ball_attached {
+            game_res.game.serve();
+        } else if !game_res.game.in_play {
+            game_res.game.reset_game();
         }
+    }
+
+    // Toggle acoustic radiation pressure coupling
+    if keyboard.just_pressed(KeyCode::KeyT) {
+        game_res.game.toggle_wave_force();
     }
 
     // Pause toggle
@@ -159,9 +151,9 @@ fn handle_input(
         game_res.paused = !game_res.paused;
     }
 
-    // Reset field
+    // Restart game
     if keyboard.just_pressed(KeyCode::KeyR) {
-        game_res.game.serve(2);
+        game_res.game.reset_game();
     }
 }
 
@@ -171,22 +163,11 @@ fn step_simulation(
     mut images: ResMut<Assets<Image>>,
 ) {
     if !game_res.paused {
-        // AI tracking for player 2 paddle
-        if game_res.ai_enabled && game_res.game.in_play {
-            let cy = game_res.game.ball_y;
-            let p2_center = game_res.game.p2_paddle_y as f32 + game_res.game.paddle_height as f32 / 2.0;
-            if cy < p2_center - 1.5 {
-                game_res.game.move_p2(-2);
-            } else if cy > p2_center + 1.5 {
-                game_res.game.move_p2(2);
-            }
-        }
-
-        // Advance Dzog field simulation
+        // Advance Dzog field simulation and ball kinematics
         game_res.game.step();
     }
 
-    // Render field to pixel buffer
+    // Render updated state to pixel buffer
     game_res.game.render_to_pixel_buffer();
 
     // Copy pixels to Bevy GPU texture asset
@@ -200,19 +181,40 @@ fn update_ui(
     mut score_query: Query<&mut Text, (With<ScoreText>, Without<StatusText>)>,
     mut status_query: Query<&mut Text, (With<StatusText>, Without<ScoreText>)>,
 ) {
+    let game = &game_res.game;
+    let energy_mj = game.field_energy.total * 1000.0;
+    let lives_str = match game.lives {
+        3 => "[3] ♥ ♥ ♥",
+        2 => "[2] ♥ ♥ ♡",
+        1 => "[1] ♥ ♡ ♡",
+        _ => "[0] ♡ ♡ ♡",
+    };
+
     for mut text in &mut score_query {
         text.0 = format!(
-            "PLAYER 1: {:02}   |   RALLY: {:02}   |   PLAYER 2: {:02}",
-            game_res.game.p1_score, game_res.game.rally_count, game_res.game.p2_score
+            "SCORE: {:05}   |   LIVES: {}   |   BRICKS: {:02}/32   |   ENERGY: {:.1} mJ",
+            game.score, lives_str, game.bricks_remaining, energy_mj
         );
     }
 
     for mut text in &mut status_query {
-        let ai_str = if game_res.ai_enabled { "ON" } else { "OFF" };
-        let pause_str = if game_res.paused { " [PAUSED]" } else { "" };
-        let serve_hint = if !game_res.game.in_play { " [PRESS SPACE TO SERVE]" } else { "" };
+        let blast_str = if game.wave_force_enabled { "ON" } else { "OFF" };
+        let pause_str = if game_res.paused { "  [PAUSED]" } else { "" };
+
+        let action_hint = if !game.in_play {
+            if game.bricks_remaining == 0 {
+                "  ★ VICTORY! ALL BRICKS CLEARED ★  [SPACE/R: REPLAY]"
+            } else {
+                "  ☠ GAME OVER ☠  [SPACE/R: RESTART]"
+            }
+        } else if game.ball_attached {
+            "  >>> [PRESS SPACE TO LAUNCH] <<<"
+        } else {
+            ""
+        };
+
         text.0 = format!(
-            "[W/S] P1  |  [Up/Dn] P2  |  [A] AI: {ai_str}  |  [Space] Serve  |  [P] Pause{pause_str}{serve_hint}"
+            "[A/D / Left/Right] Move  |  [Space] Launch  |  [T] Wave Force: {blast_str}  |  [P] Pause  |  [R] Restart{pause_str}{action_hint}"
         );
     }
 }

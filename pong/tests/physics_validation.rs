@@ -1,82 +1,145 @@
-//! Automated field-first physics validation tests for Pong on the Dzog lattice.
+//! Automated field-first physics validation tests for Breakout on the Dzog lattice.
 
 #[path = "../src/field_game.rs"]
 mod field_game;
 
-use field_game::SolitonFieldGame;
+use field_game::{BreakoutFieldGame, StepEvent};
 
 #[test]
-fn test_field_pong_paddle_rebound_and_rally() {
-    let mut game = SolitonFieldGame::new(80, 32);
+fn test_breakout_paddle_rebound_and_serve() {
+    let mut game = BreakoutFieldGame::new(80, 48);
 
-    // Serve horizontally towards player 2 (right paddle at x = 72)
-    game.serve(2);
-    game.ball_vy = 0.0; // Launch horizontally dead center into paddle
-    assert!(game.in_play);
+    assert!(game.ball_attached, "Ball should start attached to paddle");
+    game.serve();
+    assert!(!game.ball_attached, "Ball should be launched after serve");
+    assert!(game.ball_vy < 0.0, "Ball must travel upwards toward bricks");
 
-    // Ensure ball starts in court center
-    assert!(game.ball_x >= 38.0 && game.ball_x <= 42.0);
-    assert!(game.ball_vx > 0.0);
+    // Position paddle to intercept a downward falling ball
+    game.ball_x = 40.0;
+    game.ball_y = game.paddle_y as f32 - 4.0;
+    game.ball_vx = 0.0;
+    game.ball_vy = 0.6; // Moving down towards paddle
 
-    // Position player 2 paddle to guarantee interception
-    game.p2_paddle_y = game.height / 2 - game.paddle_height / 2;
+    game.paddle_x = 30.0;
     game.sync_paddle_boundaries();
 
-    // Step until ball hits paddle 2 and reflects leftwards
     let mut rebounded = false;
-    for _ in 0..80 {
-        game.step();
-        if game.ball_vx < 0.0 {
+    for _ in 0..60 {
+        let event = game.step();
+        if event == StepEvent::PaddleHit || game.ball_vy < 0.0 {
             rebounded = true;
             break;
         }
     }
 
-    assert!(rebounded, "Ball should have reflected off paddle 2");
-    assert!(game.in_play, "Game should remain in play during rally");
-    assert_eq!(game.rally_count, 1, "Rally count should increment on paddle hit");
+    assert!(rebounded, "Ball should rebound upwards off paddle");
+    assert!(game.ball_vy < 0.0, "Ball vertical velocity must be inverted");
 
-    // Verify acoustic lattice was excited at impact point
+    // Verify acoustic lattice was excited at paddle strike point
     let p_max = game.solver.state.pressure.iter().copied().fold(0.0f32, f32::max);
-    assert!(p_max > 0.1, "Paddle bounce must excite acoustic lattice waves");
+    assert!(p_max > 0.05, "Paddle strike must excite acoustic shockwaves");
 }
 
 #[test]
-fn test_field_pong_goal_detection() {
-    let mut game = SolitonFieldGame::new(80, 32);
+fn test_two_hit_brick_destruction() {
+    let mut game = BreakoutFieldGame::new(80, 48);
+    let initial_bricks = game.bricks_remaining;
+    assert!(initial_bricks > 0);
 
-    // Serve towards player 1 (left)
-    game.serve(1);
-    assert!(game.in_play);
+    // Identify bottom-row brick (row 3, col 0) so the ball has an open path from below
+    let target_idx = 24;
+    let target = game.bricks[target_idx];
+    let brick_cx = target.x as f32 + target.w as f32 / 2.0;
+    let brick_bottom = (target.y + target.h) as f32;
 
-    // Move player 1's paddle out of the way to allow goal
-    game.p1_paddle_y = 1;
-    game.sync_paddle_boundaries();
+    // --- HIT 1: STRESS CRACK ---
+    game.ball_attached = false;
+    game.ball_x = brick_cx;
+    game.ball_y = brick_bottom + 2.0;
+    game.ball_vx = 0.0;
+    game.ball_vy = -0.6; // Travel straight up into brick
 
-    // Step until ball reaches left goal line (x < 2)
-    let mut scored = false;
-    for _ in 0..120 {
-        if let Some(scorer) = game.step() {
-            assert_eq!(scorer, 2, "Player 2 should score when ball enters left goal");
-            scored = true;
+    let mut cracked = false;
+    for _ in 0..40 {
+        let event = game.step();
+        if let StepEvent::BrickCracked { brick_idx, .. } = event {
+            assert_eq!(brick_idx, target_idx);
+            cracked = true;
             break;
         }
     }
 
-    assert!(scored, "Goal should trigger when ball penetrates past paddle line");
-    assert_eq!(game.p2_score, 1, "Player 2 score should increment");
-    assert!(!game.in_play, "Game should exit in_play after goal");
+    assert!(cracked, "First hit must trigger BrickCracked event");
+    assert_eq!(game.bricks[target_idx].hits_left, 1, "Brick should have 1 hit remaining");
+    assert!(game.bricks[target_idx].is_alive(), "Brick must remain alive after 1 hit");
+    assert_eq!(game.bricks_remaining, initial_bricks, "Brick count must not decrease yet");
+    assert!(game.ball_vy > 0.0, "Ball must rebound downward after hit 1");
+
+    // --- HIT 2: PHYSICAL SHATTER ---
+    // Launch again into the same cracked brick
+    game.ball_x = brick_cx;
+    game.ball_y = brick_bottom + 2.0;
+    game.ball_vx = 0.0;
+    game.ball_vy = -0.6; // Travel straight up into brick
+
+    let mut broken = false;
+    for _ in 0..40 {
+        let event = game.step();
+        if let StepEvent::BrickBroken { brick_idx, .. } = event {
+            assert_eq!(brick_idx, target_idx);
+            broken = true;
+            break;
+        }
+    }
+
+    assert!(broken, "Second hit must physically break the brick");
+    assert_eq!(game.bricks[target_idx].hits_left, 0, "Brick hits_left should be 0");
+    assert!(!game.bricks[target_idx].is_alive(), "Brick must be dead after 2 hits");
+    assert_eq!(game.bricks_remaining, initial_bricks - 1, "Brick count must decrement by 1");
+
+    // Verify boundary was cleared from Yee lattice
+    let b = game.bricks[target_idx];
+    let idx_center = game.solver.state.config.index(b.x + b.w / 2, b.y + b.h / 2);
+    assert!(!game.solver.boundary.wall_east[idx_center], "Broken brick boundary must be cleared on East face");
+    assert!(!game.solver.boundary.wall_north[idx_center], "Broken brick boundary must be cleared on North face");
+
+    // Verify cavitation blast acoustic shockwave
+    let p_max = game.solver.state.pressure.iter().copied().fold(0.0f32, f32::max);
+    assert!(p_max > 0.2, "Cavitation rupture must inject massive pressure burst");
 }
 
 #[test]
-fn test_field_pixel_rasterization() {
-    let mut game = SolitonFieldGame::new(64, 32);
-    game.serve(2);
+fn test_acoustic_radiation_force_coupling() {
+    let mut game = BreakoutFieldGame::new(64, 40);
+    game.ball_attached = false;
+    game.ball_x = 32.0;
+    game.ball_y = 20.0;
+    game.ball_vx = 0.0;
+    game.ball_vy = 0.0;
+    game.wave_force_enabled = true;
+
+    // Inject strong high pressure compression to the right of the ball (at x = 33)
+    let idx_east = game.solver.state.config.index(33, 20);
+    game.solver.state.pressure[idx_east] = 5.0;
+
+    // Step simulation: the negative pressure gradient -grad(p) should push ball leftwards (vx < 0)
+    game.step();
+
+    assert!(game.ball_vx < 0.0, "Ball should be accelerated away from high acoustic pressure by radiation force");
+}
+
+#[test]
+fn test_pixel_rasterization_and_energy() {
+    let mut game = BreakoutFieldGame::new(64, 32);
+    game.serve();
     game.render_to_pixel_buffer();
 
     assert_eq!(game.pixel_buffer.len(), 64 * 32 * 4);
 
-    // Verify non-zero pixels exist (ball, paddles, boundary, waves)
+    // Non-zero pixels exist (ball, paddle, walls, bricks, wave field)
     let non_zero_count = game.pixel_buffer.iter().filter(|&&b| b > 0).count();
-    assert!(non_zero_count > 100, "Pixel buffer should contain rasterized game field");
+    assert!(non_zero_count > 300, "Pixel buffer should contain rasterized game field");
+
+    // Hamiltonian field energy
+    assert!(game.field_energy.total >= 0.0, "Total field energy must be non-negative");
 }
