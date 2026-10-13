@@ -10,6 +10,10 @@ struct SimParams {
     inv_dx: f32,
     inv_dy: f32,
     outer_rule: u32, // 0 = RigidWall, 1 = AbsorbingSponge, 2 = Periodic
+    beta: f32,
+    alpha: f32,
+    threshold_decay: f32,
+    _pad: f32,
 }
 
 @group(0) @binding(0) var<uniform> params: SimParams;

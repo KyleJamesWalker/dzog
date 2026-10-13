@@ -7,5 +7,6 @@ description = "Physically accurate Pong game benchmark for Dzoglang engine devel
 [dependencies]
 dzog-core = { path = "../crates/dzog-core" }
 crossterm = { workspace = true }
+bevy = { workspace = true }
 log = { workspace = true }
 env_logger = { workspace = true }

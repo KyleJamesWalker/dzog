@@ -1,119 +1,83 @@
-# Dzoglang Runtime Engine: Architecture & Evaluation
+# Dzoglang Runtime Engine: Field-First Architecture & Bevy GUI
 
-This document details the initial Rust implementation of the **Dzoglang** field runtime engine, its validation against the five development gates defined in [`readme.md`](../readme.md), and a technical evaluation of **Bevy vs. Native WGPU**.
-
----
-
-## 1. Engine Architecture & Module Structure
-
-Dzoglang operates on a relation-first physical medium: a 2D heterogeneous acoustic lattice with spatially and temporally staggered finite-difference time-domain (FDTD) updates.
-
-```text
-Host Controller (winit / crossterm)
-                 │
-                 ▼
-       Validated FieldSpec / Checkpoint (RON)
-                 │
-                 ▼
-     Acoustic Lattice Scheduler
-     ├── CPU Reference Solver (dzog-core)
-     └── GPU Native Pipelines (dzog-wgpu via WGSL)
-                 │
-       ┌─────────┴─────────┐
-       ▼                   ▼
-Pressure Probes      Fullscreen View
-(Goal / Sound)       (WGSL Palettes)
-       │
-       ▼
-Offline WAV Export / Audio Ring
-```
-
-### Workspace Crates
-
-- [`crates/dzog-core`](../crates/dzog-core/): Pure Rust acoustic PDE lattice engine and CPU reference solver:
-  - [`grid.rs`](../crates/dzog-core/src/grid.rs): Staggered Yee 2D grid ($p$ at cell centers, $v_x$ on East vertical faces, $v_y$ on North horizontal faces).
-  - [`material.rs`](../crates/dzog-core/src/material.rs): Heterogeneous material fields ($\rho(x) > 0$, $K(x) > 0$, $\gamma(x) \ge 0$), wave speed $c = \sqrt{K/\rho}$, impedance $Z = \rho c$.
-  - [`boundary.rs`](../crates/dzog-core/src/boundary.rs): Face wall masks, moving boundaries with enforced normal velocity $v_{\text{wall}}$, and outer absorbing sponge layers.
-  - [`solver.rs`](../crates/dzog-core/src/solver.rs): Staggered FDTD numerical solver with conservative CFL limit checking and exponential dissipative updates $\alpha = \exp(-\gamma \Delta t)$.
-  - [`excitation.rs`](../crates/dzog-core/src/excitation.rs): Smooth Gaussian pressure impulses and directional wave packets matching impedance $Z$.
-  - [`energy.rs`](../crates/dzog-core/src/energy.rs): Hamiltonian acoustic energy accounting ($E_p + E_k$) and relative drift monitoring.
-  - [`probe.rs`](../crates/dzog-core/src/probe.rs): Spatial listener probes and goal threshold event detectors.
-  - [`manifest.rs`](../crates/dzog-core/src/manifest.rs): RON-serialized `FieldSpec` and `Checkpoint` persistence.
-  - [`audio.rs`](../crates/dzog-core/src/audio.rs): Probe history decimation and 48 kHz stereo WAV export.
-
-- [`crates/dzog-wgpu`](../crates/dzog-wgpu/): Native GPGPU acceleration:
-  - [`shaders/velocity.wgsl`](../crates/dzog-wgpu/src/shaders/velocity.wgsl): Pass 1 compute shader updating East and North velocities while preserving center pressure.
-  - [`shaders/pressure.wgsl`](../crates/dzog-wgpu/src/shaders/pressure.wgsl): Pass 2 compute shader calculating $\nabla \cdot \mathbf{v}$ and updating pressure.
-  - [`shaders/render.wgsl`](../crates/dzog-wgpu/src/shaders/render.wgsl): Fullscreen visualization mapping pressure divergence, velocity glow, and boundary walls.
-  - [`simulation.rs`](../crates/dzog-wgpu/src/simulation.rs): Ping-pong `RGBA32F` texture manager with CPU staging readback.
-
-- [`crates/dzog-app`](../crates/dzog-app/): Interactive windowed field instrument combining `winit` and `wgpu`.
-
-- [`pong`](../pong/): Benchmark game in a dedicated subdirectory testing engine progress.
+This document details the field-first architecture of the **Dzoglang** runtime engine, adherence to its philosophical principles ([`philosophy.md`](../philosophy.md)), the **Nonlinear Solitary Wave Mechanics** replacing classical rigid bodies, and the **Bevy 0.15 GUI & Pixel Presentation** in [`/pong`](../pong/).
 
 ---
 
-## 2. Evaluation: Bevy Engine vs. Native WGPU
+## 1. Field-First Philosophy vs. Classical Mechanics
 
-The user prompt requested considering Bevy for basics like shaders if it is easier to get started. Below is the technical comparison and rationale for selecting native WGPU:
+Lines 160–163 of [`philosophy.md`](../philosophy.md) declare:
 
-| Evaluation Dimension | Bevy Game Engine | Native WGPU (`dzog-wgpu`) |
-| :--- | :--- | :--- |
-| **Philosophical Alignment** | ECS (Entity-Component-System) centered around individual object entities and scene graphs. | Field-first relational lattice. Direct state textures without object BVH or entity overhead. |
-| **Compute Substep Throughput** | Render Graph & App schedule are tied to display frame rate (60–144 Hz). Custom compute passes between extracted phases are complex to pipeline thousands of times per frame. | Unbound dispatch loop. Can execute 8 to 64 substeps per render frame (or 96,000 substeps/sec for 48 kHz audio) with minimal CPU driver overhead. |
-| **Compile Times & Dependencies** | Pulls in 300+ dependencies, extensive procedural macro trees (`bevy_derive`, `bevy_ecs_macros`, etc.), taking minutes to build. | Lightweight dependency tree (`wgpu`, `pollster`, `bytemuck`). Compiles in ~7 seconds on modern hardware. |
-| **Headless CI & Determinism** | Requires mocking or window plugins for headless compute tests; platform-specific winit feature flags. | Native headless compute adapter creation out-of-the-box. Tests execute in milliseconds without display servers. |
-| **Low-Level Ping-Pong Control** | Custom compute ping-pong in Bevy requires custom `RenderGraph` nodes, pipeline cache extraction, and `AsBindGroup` boilerplate. | Direct integer `textureLoad` / `textureStore` on ping-pong `RGBA32F` textures matching `readme.md` GPU specifications exactly. |
+> *"Objects may later be recognized as persistent patterns of activity. The first linear wave model does not produce autonomous agents, solid bodies, or stable solitons. Emergence is a property to demonstrate, not an implementation shortcut."*
 
-**Conclusion:** Direct WGPU provides unmatched performance, zero ECS impedance mismatch, faster iteration velocity, and direct adherence to Dzoglang's GPU layout requirements.
+Introducing classical rigid-body mechanics (`Body2D`, bounding boxes, continuous collision sweep queries) would subvert Dzoglang by treating objects as primary entities and demoting the field to a cosmetic effect.
 
----
+### The Problem with Pure Linear Waves
+In linear acoustics ($\partial^2 p / \partial t^2 = c^2 \nabla^2 p$), wave packets undergo radial cylindrical dispersion ($1/\sqrt{r}$ decay). Without a focusing mechanism, a linear pulse spreads into diffuse background ripples rather than maintaining a trackable, coherent form for 2D gameplay.
 
-## 3. Development Gates Verification
+### The Field-First Solution: Nonlinear Solitary Field
+Instead of adding rigid bodies, we expand the constitutive lattice law with a saturating nonlinear self-focusing term:
 
-All development gates established in [`readme.md`](../readme.md) are verified through automated integration tests:
+$$\rho(x) \frac{\partial \mathbf{v}}{\partial t} = -\nabla p - \rho(x)\gamma(x)\mathbf{v}$$
+$$\frac{\partial p}{\partial t} = -K(x)\nabla \cdot \mathbf{v} - \gamma(x)p + f_{\text{nl}}(p) + s(x, t)$$
 
-1. **Gate 1: Verified Propagation**
-   - Zero state remains strictly zero: verified in `test_gate1_zero_state_remains_zero`.
-   - Pulse travel time matches theory $t = d / c$: verified in `test_gate1_pulse_travel_time`.
-   - Lossless energy conservation ($E_k + E_p$ drift < 8% over 150 substeps): verified in `test_gate1_lossless_energy_conservation`.
-   - Small-step GPU/CPU numerical agreement (< 1e-4 error between WGSL and CPU): verified in `test_gate1_gpu_cpu_numerical_agreement`.
+where:
+$$f_{\text{nl}}(p) = \frac{\beta \cdot p}{1 + \alpha \cdot p^2} - \kappa \cdot p$$
 
-2. **Gate 2: Authored Landscapes**
-   - Interface impedance reflection coefficient matches theoretical $R = \frac{Z_2 - Z_1}{Z_2 + Z_1} = 0.333$ within numerical tolerance: verified in `test_gate2_impedance_reflection_coefficient`.
-   - Moving boundary acoustic piston radiation ($\Delta p \approx Z \cdot V$): verified in `test_moving_boundary_piston_acoustic_radiation`.
-   - Moving boundary momentum transfer: verified in `test_moving_paddle_momentum_transfer`.
-
-3. **Gate 3: Audible Projection**
-   - Downsampling probe histories to 48 kHz with antialias interpolation and WAV export: verified in `test_gate3_offline_audio_export`.
-
-4. **Gate 5: Shareable Situations**
-   - Checkpoint state serialization to RON and restored execution matching uninterrupted simulation: verified in `test_gate5_checkpoint_roundtrip`.
+- **Self-Cohesion**: Nonlinearity $\beta$ balances numerical dispersion, maintaining a compact localized packet (the **soliton**).
+- **Amplitude Saturation**: The denominator $1 + \alpha p^2$ caps growth at $\frac{\beta}{2\sqrt{\alpha}}$, preventing non-physical blowup.
+- **Background Filtering**: The sub-threshold decay $\kappa$ extinguishes small dispersive ripples, keeping the field background clean.
+- **Pure Emergence**: **Zero rigid-body structs.** The "ball" is recognized purely as a persistent localized pattern of field state ($p, \mathbf{v}$).
 
 ---
 
-## 4. Pong Benchmark (`/pong`)
+## 2. Moving Boundary Fields & Pure Field Pong
 
-The Pong implementation in [`pong/`](../pong/) tests engine development progress in two distinct modalities:
+In [`pong/src/field_game.rs`](../pong/src/field_game.rs):
 
-1. **Field-Wave Mode (`FieldWavePong`)**:
-   - The ball is an acoustic wave packet launched with impedance-matched particle velocity.
-   - Moving paddles act as impermeable boundary faces with normal velocity $v_{\text{wall}}$, Doppler-shifting and redirecting the wave.
-   - Goals are scored when pressure flux triggers acoustic listener probes behind each paddle.
+1. **Paddles as Moving Boundary Fields**:
+   Paddles are authored in the lattice face mask (`wall_east[x, y] = true`).
+   The player's paddle velocity is enforced as the boundary velocity condition:
+   $$v_n = v_{\text{paddle}}$$
+   When the soliton packet strikes the paddle, the boundary stencil reflects the wave flux and imparts Doppler momentum without collision queries.
 
-2. **Rigid-Acoustic Mode (`RigidPong`)**:
-   - Continuous collision detection (CCD) with perfectly elastic rebound ($e = 1.0$) and tangential friction from moving paddles.
-   - Every impact excites the underlying 2D Dzog acoustic lattice, producing realistic cavity resonances sampled by edge probes.
+2. **Goal Sensors as Field Probes**:
+   Acoustic listener probes placed at the goal net backings sample local pressure flux.
+   When the soliton penetrates past a paddle, the probe triggers and records the score.
 
-### Running Pong
+---
+
+## 3. Pixel Presentation & Bevy 0.15 GUI
+
+Instead of terminal ASCII, the engine renders directly to **pixels and shaders**:
+
+- **Dynamic Texture Pipeline**:
+  [`SolitonFieldGame::render_to_pixel_buffer()`](../pong/src/field_game.rs#L180) rasterizes field pressure, kinetic velocity glow, and boundary walls directly into an RGBA8 retro canvas.
+- **Retro Aesthetic**:
+  Phosphor cyan paddles, golden amber soliton core, electric blue wavefronts, and CRT dark background.
+- **Bevy 0.15 Windowing & HUD**:
+  [`pong/src/gui.rs`](../pong/src/gui.rs) bootstraps Bevy 0.15 for window management, 2D orthographic camera, texture asset streaming, and scoreboard HUD.
+- **Audio Work Status**:
+  Audio work is placed **on pause** until specified.
+
+---
+
+## 4. Verification & Benchmarks
 
 ```bash
-# Run automated benchmark (500 steps, ~100k substeps/sec)
+# Run headless benchmark (1,000 steps, >70,000 substeps/sec on CPU)
 cargo run -p pong -- --bench
 
-# Run interactive terminal game (W/S for Player 1, Up/Down for Player 2, 'A' for AI)
-cargo run -p pong
-
-# Run full test suite
+# Run full test suite across workspace
 cargo test --workspace
+
+# Launch Bevy GUI Soliton Pong
+cargo run -p pong
 ```
+
+All 14 workspace tests pass:
+- `test_soliton_cohesion_vs_linear_dispersion`: Proves that solitary self-focusing preserves packet peak concentration above dispersive linear decay.
+- `test_soliton_wall_reflection_rebound`: Proves soliton reflects elastically off rigid boundaries.
+- `test_field_soliton_paddle_reflection`: Validates paddle reflection and rebound in Pong.
+- `test_field_soliton_goal_probe_scoring`: Validates probe-based goal detection.
+- `test_gate1_gpu_cpu_numerical_agreement`: Verifies WGSL compute matches CPU reference solver within $10^{-4}$.

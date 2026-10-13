@@ -6,6 +6,27 @@ use crate::grid::{AcousticState, GridConfig};
 use crate::material::MaterialField;
 use crate::probe::PressureProbe;
 
+/// Nonlinear constitutive field parameters for solitary wave cohesion.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct NonlinearLaw {
+    /// Soliton focusing strength (0.0 = pure linear acoustics).
+    pub beta: f32,
+    /// Saturation parameter preventing blowup.
+    pub alpha: f32,
+    /// Sub-threshold background decay rate.
+    pub threshold_decay: f32,
+}
+
+impl Default for NonlinearLaw {
+    fn default() -> Self {
+        Self {
+            beta: 0.0,
+            alpha: 1.0,
+            threshold_decay: 0.0,
+        }
+    }
+}
+
 /// Solver configuration and time-step discretization parameters.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct SolverConfig {
@@ -15,6 +36,8 @@ pub struct SolverConfig {
     pub cfl_safety: f32,
     /// Number of substeps advanced per frame or macro-step.
     pub substeps_per_macro: usize,
+    /// Nonlinear solitary field law parameters.
+    pub nonlinearity: NonlinearLaw,
 }
 
 impl SolverConfig {
@@ -33,7 +56,17 @@ impl SolverConfig {
         assert!(dt > 0.0 && dt.is_finite(), "dt must be positive and finite");
         assert!(cfl_safety > 0.0 && cfl_safety < 1.0, "cfl_safety must be in (0, 1)");
         assert!(substeps_per_macro >= 1, "substeps_per_macro must be >= 1");
-        Self { dt, cfl_safety, substeps_per_macro }
+        Self {
+            dt,
+            cfl_safety,
+            substeps_per_macro,
+            nonlinearity: NonlinearLaw::default(),
+        }
+    }
+
+    pub fn with_nonlinearity(mut self, nonlinearity: NonlinearLaw) -> Self {
+        self.nonlinearity = nonlinearity;
+        self
     }
 }
 
@@ -226,7 +259,20 @@ impl AcousticSolver {
                 let gamma = self.material.damping[idx];
                 let decay = (-gamma * dt).exp();
 
-                self.state.pressure[idx] = decay * self.state.pressure[idx] - (k * dt) * div_v;
+                let p_linear = decay * self.state.pressure[idx] - (k * dt) * div_v;
+
+                // Nonlinear solitary field dynamics
+                let p_new = if self.config.nonlinearity.beta > 0.0 {
+                    let beta = self.config.nonlinearity.beta;
+                    let alpha = self.config.nonlinearity.alpha;
+                    let kappa = self.config.nonlinearity.threshold_decay;
+                    let nl_flux = (beta * p_linear) / (1.0 + alpha * p_linear * p_linear) - kappa * p_linear;
+                    p_linear + nl_flux * dt
+                } else {
+                    p_linear
+                };
+
+                self.state.pressure[idx] = p_new;
             }
         }
 

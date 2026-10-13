@@ -10,6 +10,10 @@ struct SimParams {
     inv_dx: f32,
     inv_dy: f32,
     outer_rule: u32, // 0 = RigidWall, 1 = AbsorbingSponge, 2 = Periodic
+    beta: f32,
+    alpha: f32,
+    threshold_decay: f32,
+    _pad: f32,
 }
 
 @group(0) @binding(0) var<uniform> params: SimParams;
@@ -65,7 +69,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let gamma = cur_mat.b;
     let decay = exp(-gamma * params.dt);
 
-    let p_new = decay * cur_state.r - (k * params.dt) * div_v;
+    let p_linear = decay * cur_state.r - (k * params.dt) * div_v;
+
+    var p_new = p_linear;
+    if (params.beta > 0.0) {
+        let nl_flux = (params.beta * p_linear) / (1.0 + params.alpha * p_linear * p_linear) - params.threshold_decay * p_linear;
+        p_new = p_linear + nl_flux * params.dt;
+    }
 
     // Write updated state: new pressure, preserved velocities
     textureStore(state_out, coord, vec4<f32>(p_new, vx_e, vy_n, 0.0));

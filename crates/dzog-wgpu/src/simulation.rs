@@ -16,6 +16,10 @@ pub struct GpuSimParams {
     pub inv_dx: f32,
     pub inv_dy: f32,
     pub outer_rule: u32,
+    pub beta: f32,
+    pub alpha: f32,
+    pub threshold_decay: f32,
+    pub _pad: f32,
 }
 
 pub struct GpuSimulation {
@@ -70,6 +74,10 @@ impl GpuSimulation {
             inv_dx: 1.0 / state.config.dx,
             inv_dy: 1.0 / state.config.dy,
             outer_rule,
+            beta: config.nonlinearity.beta,
+            alpha: config.nonlinearity.alpha,
+            threshold_decay: config.nonlinearity.threshold_decay,
+            _pad: 0.0,
         };
 
         let params_buffer = ctx.device.create_buffer(&BufferDescriptor {
@@ -291,14 +299,14 @@ impl GpuSimulation {
         }
 
         ctx.queue.write_texture(
-            ImageCopyTexture {
+            TexelCopyTextureInfo {
                 texture: &self.texture_a,
                 mip_level: 0,
                 origin: Origin3d::ZERO,
                 aspect: TextureAspect::All,
             },
             bytemuck::cast_slice(&buffer),
-            ImageDataLayout {
+            TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(self.width * 16),
                 rows_per_image: Some(self.height),
@@ -323,14 +331,14 @@ impl GpuSimulation {
         }
 
         ctx.queue.write_texture(
-            ImageCopyTexture {
+            TexelCopyTextureInfo {
                 texture: &self.material_texture,
                 mip_level: 0,
                 origin: Origin3d::ZERO,
                 aspect: TextureAspect::All,
             },
             bytemuck::cast_slice(&buffer),
-            ImageDataLayout {
+            TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(self.width * 16),
                 rows_per_image: Some(self.height),
@@ -359,14 +367,14 @@ impl GpuSimulation {
         }
 
         ctx.queue.write_texture(
-            ImageCopyTexture {
+            TexelCopyTextureInfo {
                 texture: &self.boundary_texture,
                 mip_level: 0,
                 origin: Origin3d::ZERO,
                 aspect: TextureAspect::All,
             },
             bytemuck::cast_slice(&buffer),
-            ImageDataLayout {
+            TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(self.width * 16),
                 rows_per_image: Some(self.height),
@@ -423,15 +431,15 @@ impl GpuSimulation {
         });
 
         encoder.copy_texture_to_buffer(
-            ImageCopyTexture {
+            TexelCopyTextureInfo {
                 texture: &self.texture_a,
                 mip_level: 0,
                 origin: Origin3d::ZERO,
                 aspect: TextureAspect::All,
             },
-            ImageCopyBuffer {
+            TexelCopyBufferInfo {
                 buffer: &self.staging_buffer,
-                layout: ImageDataLayout {
+                layout: TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(bytes_per_row),
                     rows_per_image: Some(self.height),

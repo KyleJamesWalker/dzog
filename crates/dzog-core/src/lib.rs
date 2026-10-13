@@ -27,4 +27,4 @@ pub use grid::{AcousticState, GridConfig};
 pub use manifest::{Checkpoint, FieldSpec, ProbeDef};
 pub use material::MaterialField;
 pub use probe::{PressureProbe, ProbeSample};
-pub use solver::{AcousticSolver, SolverConfig};
+pub use solver::{AcousticSolver, NonlinearLaw, SolverConfig};
