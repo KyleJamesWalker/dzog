@@ -1,4 +1,6 @@
-# Dzog
+# Dzog <small>by [Jonathan Dunlap](https://www.linkedin.com/in/jonathandunlap/)</small>
+
+> "True Life is the fabric membrane stretched to the very edge of questioning one’s sanity between comforting stale concrete order and to that creative devouring awe of chaos."
 
 **A GPU-accelerated 2D wave-matter and field-physics engine for Bevy.**
 
