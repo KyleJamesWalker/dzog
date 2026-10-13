@@ -1,86 +1,101 @@
 # Dzog
 
-**A continuous field-mechanics runtime for relation-first computing.**
+**A GPU-accelerated 2D wave-matter and field-physics engine for Bevy.**
 
-Conventional runtimes decompose reality into isolated object graphs, discrete state machines, and imperative instruction narratives. **Dzog** replaces object-centric execution with a spatially continuous lattice governed by partial differential equations (PDEs), nonlinear solitary wave dynamics, and Bohm-Hiley active-information guidance.
+Conventional game engines treat space as an empty coordinate system populated by isolated rigid bodies (`struct Asteroid { hp: 2 }`) that ignore one another until a bounding-box check triggers an imperative callback. **Dzog** replaces object-centric execution with a continuous physical medium governed by wave mechanics, solid-state crystal cohesion, and pilot-wave guidance.
 
-In Dzog, a program is not a sequence of instructions attached to objects—it is an **executable situation**: a Hamiltonian landscape of constitutive laws, heterogeneous material fields, boundary commitments, and excitations. Persistent entities (solitons, waveguides, structural bodies) emerge from local field relations, interfere across space, and exchange momentum without scene graphs or collision hierarchies.
-
-Read [philosophy.md](./philosophy.md) for the theoretical foundations (Bohm-Hiley active information, Hillman's situated image, and living actor ecologies) and [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) for the runtime architecture.
+In Dzog, a scene is an **executable physical situation**: a lattice where every cell carries pressure, velocity, material impedance, and structural cohesion. Ships, destructible asteroids, projectiles, and shields are not sealed state machines sitting in dead space—they are persistent patterns of matter and wave excitation that radiate wakes, fracture along continuous stress planes, and interfere across space without collision hierarchies.
 
 ![Field-First Crystalline Asteroids & Alien Ecology Demo](./docs/asteroids_demo.png)
 
 ---
 
-## Theoretical Foundation: Field Mechanics as Computation
+## Quick Start
 
-Dzog operationalizes concepts from quantum field theory, nonlinear wave mechanics, and Bohmian pilot-wave dynamics into a deterministic GPU/CPU lattice runtime:
+```bash
+# Run the full verification suite (33 analytical, GPU/CPU agreement, and physics tests)
+cargo test --workspace
 
-1. **Constitutive Field Laws over Object Scripts**:
-   Every cell evolves under a unified staggered finite-difference time-domain (FDTD) operator. Behavior is authored by shaping material density $\rho(\mathbf{x})$, bulk modulus $K(\mathbf{x})$, dissipation $\gamma(\mathbf{x})$, and structural cohesion $C(\mathbf{x}) \in [0, 1]$.
-2. **Nonlinear Solitary Cohesion (Solitons)**:
-   Linear waves disperse radially ($1/\sqrt{r}$). Dzog introduces a saturating nonlinear self-focusing potential that balances numerical dispersion, allowing localized excitations to persist and rebound as coherent quasi-particles without rigid-body wrappers.
-3. **Bohm-Hiley Quantum Potential & Active Information**:
-   Following Bohm and Hiley's second-order formulation, the runtime computes the quantum potential $Q(\mathbf{x}) = -\nabla^2 R(\mathbf{x}) / R(\mathbf{x})$ from the regularized field envelope $R(\mathbf{x}) = \sqrt{p(\mathbf{x})^2 + \epsilon^2}$. Because $Q$ depends on *spatial curvature* (form) rather than raw amplitude, standing-wave channels and interference ridges exert an organizing guidance force $\mathbf{F}_Q = -\nabla Q$ on trajectories.
-4. **Continuous Phase Transitions & Structural Erosion**:
-   Solid structures are not boolean bounding boxes; they are regions of high cohesion $C(\mathbf{x})$ with finite yield thresholds $p_{\text{yield}}(\mathbf{x})$. Acoustic overpressure ($|p| > p_{\text{yield}}$) erodes cohesion, opening semi-permeable fracture waveguides before triggering cavitation phase transitions back to the ambient fluid medium.
-5. **Counterfactual Situation Branching**:
-   Authoring and verification follow the cycle:
-   ```text
-   Encounter -> Perturb -> Compare -> Commit -> Compose
-   ```
-   Complete staggered field states can be checkpointed at any integer step boundary, branched with modified relational laws, and replayed to measure causal divergence.
+# Launch the Crystalline Asteroids & Alien Ecology demo (Bevy 0.15 + WGPU + Live Audio)
+cargo run -p asteroids
+
+# Launch the Solid-State & Quantum-Vacuum Breakout demo
+cargo run -p pong
+
+# Run headless WGPU zero-readback & FDTD benchmarks
+cargo run -p asteroids -- --bench
+cargo run -p pong -- --bench
+```
 
 ---
 
-## Governing Equations & Discretization
+## Theoretical Foundation: Field Mechanics as Computation
 
-The runtime evolves scalar pressure $p(\mathbf{x}, t)$ and particle velocity $\mathbf{v}(\mathbf{x}, t)$ on a 2D Yee-staggered lattice ($p, \rho, K, \gamma, C$ at cell centers; $v_x$ on East faces; $v_y$ on North faces; velocity staggered at half-time steps $t \pm \Delta t/2$):
+Traditional engines model worlds as lists of disconnected bounding boxes: empty space carries no tension or memory, interactions are binary collision events, and adding cross-entity behaviors requires wiring brittle $O(N^2)$ state scripts. Dzog inverts this architecture—**the substrate itself is the computation**. Just as a pixel is a color element and a voxel is a volume element, every cell in a Dzog lattice is a coupled Hamiltonian field element storing dynamic wave state alongside local material commitments (density, stiffness, damping, and cohesion).
 
-$$\rho(\mathbf{x}) \frac{\partial \mathbf{v}}{\partial t} = -\nabla p - \rho(\mathbf{x})\gamma(\mathbf{x})\mathbf{v}$$
+Because the medium mediates all causality, complex gameplay mechanics emerge directly from local physical laws rather than scripted special cases. Drawing on nonlinear wave mechanics, David Bohm and Basil Hiley's *active information* (where the spatial curvature of a wavefield guides trajectories), and James Hillman's concept of the *situated image*, every actor continuously perturbs and senses its neighborhood. Weapons fire self-focusing solitary wave packets (solitons); impacts carve internal fracture waveguides that channel stress until crystals cleave topologically into tumbling fragments; shields cancel incoming fire via antiphase destructive interference; and cockpit probes synthesize real-time Doppler audio directly from local pressure oscillations.
 
-$$\frac{\partial p}{\partial t} = -K(\mathbf{x})\nabla \cdot \mathbf{v} - \gamma(\mathbf{x})p + f_{\text{nl}}(p) + s(\mathbf{x}, t)$$
+### Core Engine Pillars & Why the Math Matters
 
-where the saturating nonlinear solitary flux and local wave impedance are:
+1. **Constitutive Material Laws over Object Scripts**:
+   Every cell evolves under a unified finite-difference time-domain (FDTD) operator parameterized by density $\rho$, bulk modulus $K$, damping $\gamma$, and cohesion $C \in [0, 1]$.
+   *Why it matters*: Wave speed, reflection ratios, recoil momentum, and even the musical pitch of an impact emerge automatically from a body's material properties—no per-object interaction scripts required.
+2. **Nonlinear Solitary Cohesion (Solitons)**:
+   Standard linear waves disperse radially and fade out. Dzog adds a saturating nonlinear self-focusing law that counteracts dispersion while scrubbing low-amplitude background noise.
+   *Why it matters*: Plasma bolts, phase-pulses, and balls travel and rebound as crisp, self-sustaining wave packets without rigid-body wrappers or artificial velocity clamping.
+3. **Bohm-Hiley Active Information & Pilot-Wave Guidance**:
+   The solver continuously evaluates the Bohmian quantum potential $Q$, which measures the *normalized spatial curvature (form)* of the wave envelope rather than raw amplitude.
+   *Why it matters*: Subtle standing-wave channels and interference ridges exert an organizing guidance force ($-\nabla Q$) on actors, allowing alien craft to naturally surf phase valleys and weave around shockwaves without pathfinding graphs.
+4. **Continuous Cohesion Erosion & Topological Cleaving**:
+   Solid structures are regions of high cohesion $C$ with finite yield thresholds. Overpressure erodes cohesion along directional stress axes, opening semi-permeable fracture waveguides before severing the body.
+   *Why it matters*: Destruction is topological rather than a hitpoint counter. Striking an existing glowing crack triggers a resonance cleave that splits the crystal via connected-component BFS into independent spinning shards conserving linear and angular momentum.
+5. **Counterfactual Situation Branching**:
+   Authoring, debugging, and gameplay share a single experimental loop:
+   ```text
+   Encounter -> Perturb -> Compare -> Commit -> Compose
+   ```
+   *Why it matters*: Because the entire causal state of the world lives in deterministic lattice buffers, players and authors can snapshot any moment (`[B]`), test a counterfactual action or material change, and restore the branch (`[U]`) with zero state desynchronization.
 
-$$f_{\text{nl}}(p) = \frac{\beta \, p}{1 + \alpha \, p^2} - \kappa \, p, \qquad c(\mathbf{x}) = \sqrt{\frac{K(\mathbf{x})}{\rho(\mathbf{x})}}, \qquad Z(\mathbf{x}) = \sqrt{\rho(\mathbf{x}) K(\mathbf{x})}$$
+---
 
-### Numerical Commitments
+## Numerical Design: Built for Real-Time GPU Execution
 
-- **Interface Stencils**: Face densities derive from the arithmetic mean of adjacent cells, $\rho_{\text{face}}^{-1} = 2 / (\rho_L + \rho_R)$, yielding verified Fresnel reflection/transmission ratios $R = (Z_2 - Z_1)/(Z_2 + Z_1)$.
-- **Exponential Dissipation**: Losses integrate via unconditionally nonnegative decay factors $\exp(-\gamma \Delta t)$.
-- **Global CFL Stability Envelope**: The time step $\Delta t$ is locked prior to execution against the global material envelope:
-  $$\Delta t \le \frac{\text{safety}}{c_{\text{bound}} \sqrt{\Delta x^{-2} + \Delta y^{-2}}}, \qquad c_{\text{bound}} = \sqrt{\frac{K_{\max}}{\rho_{\min}}}, \qquad 0 < \text{safety} < 1$$
-- **Hamiltonian Energy Accounting**: Instantaneous compressional potential energy $\int \frac{p^2}{2K}\,dA$, kinetic energy $\int \frac{1}{2}\rho |\mathbf{v}|^2\,dA$, and acoustic Poynting flux $\mathbf{I} = p\mathbf{v}$ are tracked continuously to verify conservation and bounded drift.
+Running continuum PDEs at $60\text{–}120\text{ Hz}$ inside an interactive game requires strict numerical discipline so the simulation never explodes into `NaN`s, leaks energy, or stalls the CPU. Full equations, stencils, and proofs are detailed in [**`docs/field_math.md`**](./docs/field_math.md):
+
+- **Yee-Staggered Conservation**: Pressure lives at cell centers and velocity lives on East/North cell faces at half-time steps. This eliminates odd-even checkerboard artifacts and guarantees exact momentum conservation when waves slam into rotating hulls.
+- **Exact Fresnel Material Interfaces**: Face densities use adjacent-cell means so high-impedance materials (like `ObsidianAnvil`) naturally reflect glancing shots while piezo crystals (`PiezoQuartz`) transmit fast internal phonons.
+- **Blowup-Proof Rational Saturation**: Unlike cubic Kerr nonlinearities that explode when shockwaves collide, Dzog's rational saturation term mathematically bounds peak self-focusing gain while keeping empty vacuum dead-silent.
+- **Unconditionally Positive Exponential Damping**: Losses integrate via $\exp(-\gamma \Delta t)$ rather than Euler subtraction, preventing sign-flip instabilities inside high-absorption sponge boundaries and cracked crystal veins.
+- **Hamiltonian Energy Harvesting**: The engine tracks instantaneous potential and kinetic field energy across the lattice—directly powering gameplay when the player's Antiphase Shield cancels an enemy wave-bolt ($\Delta \phi = \pi$) and harvests the annihilated wave energy into the ship's weapon capacitor.
 
 ---
 
 ## Workspace Architecture
 
-| Crate | Responsibility |
+| Crate | Role |
 | --- | --- |
-| `crates/dzog-core` | Reference Yee-staggered FDTD solver, nonlinear soliton law, Bohmian quantum potential $Q(\mathbf{x})$, Poisson gravitational potential $\Phi_g(\mathbf{x})$, free-rotating `CohesiveBody` rasterization & BFS topological cleaving, reaction thruster plumes, antiphase interference shields, binaural Doppler cockpit sonification (`FieldModalSynthesizer`), Hamiltonian energy accounting, and RON `FieldSpec` / `Checkpoint` serialization. |
-| `crates/dzog-wgpu` | GPU-native compute pipeline (`velocity.wgsl`, `pressure.wgsl`, `impulse.wgsl`, `reduce_body.wgsl`) over ping-pong `RGBA32Float` state textures, periodic toroidal wrapping, zero-readback GPU body force/torque/probe reduction, and verified CPU/GPU agreement ($< 10^{-4}$). |
-| `crates/dzog-bevy` | Bevy 0.15 engine integration plugin (`DzogBevyPlugin`): nearest-neighbor field canvas rendering (`FieldImageHandle`), shared perceptual view modes (`FieldViewMode`), WGPU compute accelerator (`GpuFieldAccelerator`), and native `bevy_audio` (`Decodable` / `DzogFieldAudioSource`) streaming. |
-| `asteroids` | **Field-First Crystalline Asteroids & Alien Ecology**: Bevy 0.15 + WGPU compute demonstration of free-rotating mineralogical asteroids (`PiezoQuartz`, `ObsidianAnvil`, `BismuthCrystal`), connected-component topological cleaving, Bohmian-guided alien saucers & harmonic weavers, reaction thruster backblast, antiphase wave-interference shields, toroidal/gravity-well arenas, and binaural cockpit Doppler sonification. |
-| `pong` | **Solid-State & Quantum-Vacuum Breakout**: Bevy 0.15 + WGPU compute demonstration of solid-state crystalline phonon coupling, point-of-impact cleavage planes, sympathetic crystal cascades, Paddle Doppler Overcharge, coherent Phase-Pulse wave-casting, and counterfactual checkpoint branching. |
+| [`crates/dzog-core`](./crates/dzog-core) | Reference Yee-staggered FDTD solver, soliton law, Bohmian potential $Q$, Poisson gravity $\Phi_g$, rotating `CohesiveBody` rasterizer & BFS topological cleaving, thruster plumes, antiphase shields, $48\text{ kHz}$ modal audio synthesizer (`FieldModalSynthesizer`), and RON `FieldSpec` / `Checkpoint` serialization. |
+| [`crates/dzog-wgpu`](./crates/dzog-wgpu) | GPU compute pipeline (`velocity.wgsl`, `pressure.wgsl`, `impulse.wgsl`, `reduce_body.wgsl`) over ping-pong `RGBA32Float` state textures, toroidal periodic wrapping, zero-readback GPU body force/torque/probe reduction, and verified CPU/GPU agreement ($< 10^{-4}$). |
+| [`crates/dzog-bevy`](./crates/dzog-bevy) | Bevy 0.15 engine plugin (`DzogBevyPlugin`): nearest-neighbor field canvas presentation (`FieldImageHandle`), shared perceptual view modes (`FieldViewMode`), WGPU compute accelerator (`GpuFieldAccelerator`), and native `bevy_audio` (`Decodable` / `DzogFieldAudioSource`) streaming. |
+| [`asteroids`](./asteroids) | **Field-First Crystalline Asteroids & Alien Ecology**: Free-rotating mineralogical asteroids (`PiezoQuartz`, `ObsidianAnvil`, `BismuthCrystal`), topological cleaving, Bohmian-guided alien saucers & harmonic weavers, reaction thruster backblast, antiphase shield parries, toroidal/gravity-well arenas, and stereo cockpit sonification. |
+| [`pong`](./pong) | **Solid-State & Quantum-Vacuum Breakout**: Crystalline phonon coupling, point-of-impact cleavage planes, sympathetic crystal domino cascades, Paddle Doppler Overcharge, coherent Phase-Pulse wave-casting, and counterfactual checkpoint branching. |
 
 ### GPU Compute Pipeline (`dzog-wgpu`)
 
 ```text
-validated FieldSpec / GPU impulse shader (impulse.wgsl)
-          |
-          v
-Rust scheduler -> WGPU compute substeps (Pass 1: Velocity + Bohmian Q, Pass 2: Pressure + Soliton Flux)
-                                      |                             |
-                                      v                             v
-                               pressure probes               fullscreen shader
-                                      |
-                                      v
-                        staging readback -> audio / inspector
+FieldSpec / GPU Impulse Shader (impulse.wgsl)
+       |
+       v
+WGPU Compute Substeps (Pass 1: Velocity + Bohmian Q  -->  Pass 2: Pressure + Soliton Flux)
+       |                                                        |
+       v                                                        v
+Zero-Readback Body Force/Probe Reduction (reduce_body.wgsl)   Bevy Field Canvas & Perceptual Views
+       |
+       v
+48 kHz Modal Synthesizer (FieldModalSynthesizer -> bevy_audio Decodable)
 ```
 
-| GPU Resource | Format | Packed Channels |
+| GPU Texture | Format | Packed Channels |
 | --- | --- | --- |
 | `State A / B` | `RGBA32Float` | `(p_center, vx_east, vy_north, q_bohmian)` |
 | `Material` | `RGBA32Float` | `(density_rho, bulk_modulus_K, damping_gamma, cohesion_C)` |
@@ -88,78 +103,23 @@ Rust scheduler -> WGPU compute substeps (Pass 1: Velocity + Bohmian Q, Pass 2: P
 
 ---
 
-## Running the Runtime & Demos
-
-```bash
-# Run the full verification suite (33 unit, analytical gate, GPU/CPU agreement, and physics tests)
-cargo test --workspace
-
-# Launch the Field-First Crystalline Asteroids & Alien Ecology demo (Bevy 0.15 GUI)
-cargo run -p asteroids
-
-# Run the headless Asteroids WGPU zero-readback reduction + topological cleaving benchmark
-cargo run -p asteroids -- --bench
-
-# Launch the Solid-State & Quantum-Vacuum Breakout demo (Bevy 0.15 GUI)
-cargo run -p pong
-
-# Run the headless WGPU compute + CPU FDTD solver & rasterizer benchmark
-cargo run -p pong -- --bench
-```
-
----
-
-## Artifacts: Image As Program
-
-A screenshot or color bitmap is not a program. Dzog distinguishes three serializable artifacts (`dzog-core::manifest`):
-
-- **Specification (`FieldSpec`)**: Authored constitutive laws, grid scale, material bounds, boundary conventions, and probe topologies.
-- **Checkpoint (`Checkpoint`)**: A complete, bit-reproducible snapshot of all staggered dynamic fields ($p^n, \mathbf{v}^{n-1/2}$), material/cohesion layers, and step clocks at an integer step boundary.
-- **Performance**: A specification or checkpoint paired with step-indexed interventions for deterministic replay and counterfactual comparison.
-
----
-
-## Platform Roadmap: Toward a General 2D Field-Physics Game Engine
-
-Rather than duplicating generic ECS, windowing, or UI layers already provided by host frameworks like Bevy, Dzog focuses strictly on the **core GPU field solver, wave-matter physics, and shader presentation pipeline** required to power genres such as **2D Shmups**, **Asteroids**, and **Star Control** arena/exploration games:
-
-1. **Free-Rotating Cohesive Bodies & Topological Cleaving (*Asteroids* / Destructible Hulls)**:
-   - Generalize axis-aligned boundary masks into a GPU **rotating local-grid body rasterizer** with full linear and angular momentum $(\mathbf{P}, L_z)$.
-   - Integrate boundary radiation pressure and shear stress over arbitrary hull contours ($\mathbf{F} = -\oint p\,\mathbf{n}\,dl$, $\tau = -\oint (\mathbf{r} \times p\,\mathbf{n})\,dl$) so off-center impacts and thruster firing naturally impart torque and spin.
-   - Add **connected-component fracture splitting**: when a crystalline asteroid or ship wing is cleaved all the way through ($C(\mathbf{x}) \to 0$), split the body mask into independent tumbling child fragments conserving local momentum.
-2. **Toroidal, Advected, & Sparse-Tiled World Lattices (*Star Control* / Scrolling Shmups)**:
-   - Couple `OuterBoundaryRule::Periodic` with seamless cross-border body wrapping for classic toroidal arenas (*Asteroids* / *Star Control* Super Melee).
-   - Implement **camera-centered lattice advection** (toroidal ring-buffer shifting with outer `AbsorbingSponge` layers) and **sparse GPU tile paging** so a high-resolution local PDE field tracks ships across unbounded space or scrolling shmup stages without $O(\text{world area})$ memory cost.
-3. **Multi-Field Channels: Gravity Wells, Plasma Solitons, & Interference Shields**:
-   - **Long-Range Potential Layer ($\Phi_g, Q$)**: Fast GPU Poisson/multigrid relaxation for planetary gravity wells (*Star Control* orbital slingshots) and Bohmian attractor anomalies.
-   - **Coherent Weaponry & Wave Interference (*Shmups*)**: Directional soliton projectiles, continuous beam waveguides, and phase-tuned energy shields where players can use **destructive wave interference** to cancel incoming wave-bullets or refract beams through metamaterial prisms.
-   - **Reaction Thruster Plumes**: Propel ships by injecting directional momentum flux ($v_n, p$) into the lattice—exhaust plumes physically push nearby asteroid debris, deflect incoming projectiles, and stress adjacent hulls.
-4. **Zero-Readback GPU Pipeline & Direct Shader Compositing**:
-   - Eliminate per-frame CPU `readback_state` stalls so grids scale to $512 \times 512+$ at $120\text{ Hz}$.
-   - Run a **GPU Force & Fracture Reduction Pass** that writes net hull forces/torques and cell damage directly into a compact GPU storage buffer, and composite the field, Bohmian ridges, and crystalline hulls directly into a shared Bevy/WGPU render texture via WGSL shaders.
-5. **Live GPU-to-Audio Field Sonification**:
-   - Stream pressure histories from cockpit/listener GPU probe buffers through a lock-free SPSC ring to `cpal`, generating authentic Doppler flybys, hull resonance, shield harmonics, and cavitation explosions directly from the PDE state.
-
----
-
-## Engineering Claims & Boundaries
+## Engineering Boundaries
 
 | Capability | Engineering Boundary |
 | --- | --- |
-| **GPU-native stencil parallelism** | $O(\text{cells} \times \text{substeps})$ uniform dispatch work; empty regions cost the same as active regions. |
-| **Collision-free wave interaction** | Interference and boundary reflection require zero BVH or object pair queries, but do not replace general rigid-body contact constraints. |
-| **Continuous field representation** | Finite-difference lattices remain discrete, dispersive at high wavenumbers, and bounded by Nyquist/CFL limits. |
-| **Cross-device reproducibility** | Exact within a backend; cross-GPU floating-point associativity requires declared numerical tolerances ($10^{-4}$). |
+| **GPU stencil parallelism** | $O(\text{cells} \times \text{substeps})$ uniform dispatch work; active vacuum carries potentials across all cells. |
+| **Collision-free wave agency** | Wave interference, radiation pressure, and reflection require zero BVH queries, complemented by compact local-grid body contours. |
+| **Discrete continuum limits** | Finite-difference lattices remain bounded by declared CFL time steps and Nyquist spatial wavelengths. |
+| **Cross-device reproducibility** | Bit-exact within a backend; CPU and GPU floating-point stencils agree within tested tolerances ($< 10^{-4}$). |
 
 ---
 
-## References
+## Documentation & References
 
-- [Philosophy](./philosophy.md): Conceptual synthesis (Hillman, Bohm-Hiley, Dzogchen) and testable hypotheses.
-- [Architecture](./docs/ARCHITECTURE.md): Nonlinear solitary field equations and runtime pipeline details.
-- [Audio Overview](./docs/overview_audio.md): Field-grounded modal sonification, silent quantum vacuum gating, and `bevy_audio` (`Decodable`) integration.
-- B. J. Hiley, [*Process, Distinction, Groupoids and Clifford Algebras*](https://arxiv.org/abs/1211.2107).
-- [Stanford Encyclopedia of Philosophy: Bohmian Mechanics](https://plato.stanford.edu/entries/qm-bohm/).
+- [**Philosophy (`philosophy.md`)**](./philosophy.md): Relation-first computing, Bohm-Hiley active information, Hillman's situated image, and living actor ecologies.
+- [**Field Mathematics (`docs/field_math.md`)**](./docs/field_math.md): Governing PDEs, Yee-staggered stencils, saturating soliton law, Bohmian potential $Q$, and CFL stability bounds.
+- [**Runtime Architecture (`docs/ARCHITECTURE.md`)**](./docs/ARCHITECTURE.md): Solitary wave mechanics, moving boundary coupling, and Bevy presentation layer.
+- [**Audio Overview (`docs/overview_audio.md`)**](./docs/overview_audio.md): Material-tuned modal synthesis, silent quantum vacuum gating, and `bevy_audio` integration.
 
 ---
 
