@@ -1,0 +1,14 @@
+[package]
+name = "dzog-app"
+version = "0.1.0"
+edition = "2021"
+description = "Interactive field instrument and visualizer for Dzoglang"
+
+[dependencies]
+dzog-core = { path = "../dzog-core" }
+dzog-wgpu = { path = "../dzog-wgpu" }
+winit = { workspace = true }
+wgpu = { workspace = true }
+pollster = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }

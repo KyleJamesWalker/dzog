@@ -1,0 +1,12 @@
+[package]
+name = "dzog-wgpu"
+version = "0.1.0"
+edition = "2021"
+description = "GPU acceleration and WGSL shaders for Dzoglang acoustic field runtime"
+
+[dependencies]
+dzog-core = { path = "../dzog-core" }
+wgpu = { workspace = true }
+bytemuck = { workspace = true }
+pollster = { workspace = true }
+log = { workspace = true }

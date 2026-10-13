@@ -1,0 +1,20 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/dzog-core",
+    "crates/dzog-wgpu",
+    "crates/dzog-app",
+    "pong",
+]
+
+[workspace.dependencies]
+serde = { version = "1.0", features = ["derive"] }
+ron = "0.12"
+bytemuck = { version = "1.25", features = ["derive"] }
+wgpu = "24.0.5"
+pollster = "1.0"
+hound = "3.5"
+crossterm = "0.29"
+winit = { version = "0.30", features = ["rwh_06", "wayland", "x11"] }
+log = "0.4"
+env_logger = "0.11"

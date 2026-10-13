@@ -1,0 +1,11 @@
+[package]
+name = "pong"
+version = "0.1.0"
+edition = "2021"
+description = "Physically accurate Pong game benchmark for Dzoglang engine development"
+
+[dependencies]
+dzog-core = { path = "../crates/dzog-core" }
+crossterm = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
