@@ -1,4 +1,21 @@
-/target
+# Rust / Cargo build artifacts
+/target/
+target/
 **/*.rs.bk
+*.pdb
+*.dwo
+*.profraw
+*.profdata
+lcov.info
+
+# Audio & simulation exports
 *.wav
+
+# OS / Editor files
 .DS_Store
+Thumbs.db
+*~
+*.swp
+*.swo
+.vscode/
+.idea/
