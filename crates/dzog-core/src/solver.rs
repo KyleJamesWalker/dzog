@@ -70,6 +70,20 @@ impl SolverConfig {
     }
 }
 
+/// Unconditionally positive Padé/Taylor exponential decay exp(-x) for x >= 0.
+/// Matches IEEE-754 expf(-x) within 2e-6 for typical FDTD step losses (gamma * dt < 0.05)
+/// while avoiding scalar libm call overhead in tight lattice loops.
+#[inline(always)]
+fn fast_neg_exp(x: f32) -> f32 {
+    if x <= 0.0 {
+        1.0
+    } else if x < 0.08 {
+        1.0 / (1.0 + x * (1.0 + 0.5 * x * (1.0 + 0.33333334 * x)))
+    } else {
+        (-x).exp()
+    }
+}
+
 /// The core acoustic field engine simulation runner.
 pub struct AcousticSolver {
     pub state: AcousticState,
@@ -152,7 +166,7 @@ impl AcousticSolver {
                     let gamma_face = self.material.face_damping_east(x, y);
 
                     // Dissipative exponential factor
-                    let decay = (-gamma_face * dt).exp();
+                    let decay = fast_neg_exp(gamma_face * dt);
                     let accel = -grad_p / rho_face;
                     self.state.vx[idx] = decay * self.state.vx[idx] + accel * dt;
                 } else {
@@ -166,7 +180,7 @@ impl AcousticSolver {
                             let grad_p = (self.state.pressure[idx_wrap] - self.state.pressure[idx]) * inv_dx;
                             let rho_face = self.material.density[idx];
                             let gamma_face = self.material.damping[idx];
-                            let decay = (-gamma_face * dt).exp();
+                            let decay = fast_neg_exp(gamma_face * dt);
                             let accel = -grad_p / rho_face;
                             self.state.vx[idx] = decay * self.state.vx[idx] + accel * dt;
                         }
@@ -190,7 +204,7 @@ impl AcousticSolver {
                     let rho_face = self.material.face_density_north(x, y);
                     let gamma_face = self.material.face_damping_north(x, y);
 
-                    let decay = (-gamma_face * dt).exp();
+                    let decay = fast_neg_exp(gamma_face * dt);
                     let accel = -grad_p / rho_face;
                     self.state.vy[idx] = decay * self.state.vy[idx] + accel * dt;
                 } else {
@@ -204,7 +218,7 @@ impl AcousticSolver {
                             let grad_p = (self.state.pressure[idx_wrap] - self.state.pressure[idx]) * inv_dy;
                             let rho_face = self.material.density[idx];
                             let gamma_face = self.material.damping[idx];
-                            let decay = (-gamma_face * dt).exp();
+                            let decay = fast_neg_exp(gamma_face * dt);
                             let accel = -grad_p / rho_face;
                             self.state.vy[idx] = decay * self.state.vy[idx] + accel * dt;
                         }
@@ -260,12 +274,16 @@ impl AcousticSolver {
 
                 let k = self.material.bulk_modulus[idx];
                 let gamma = self.material.damping[idx];
-                let decay = (-gamma * dt).exp();
+                let decay = fast_neg_exp(gamma * dt);
 
                 let p_linear = decay * self.state.pressure[idx] - (k * dt) * div_v;
 
-                // Nonlinear solitary field dynamics
-                let p_new = if self.config.nonlinearity.beta > 0.0 {
+                // Nonlinear solitary field dynamics in open medium;
+                // never amplify static pressure inside solid-state structures or blocked boundary walls.
+                let is_solid_or_wall = (has_cohesion && self.material.cohesion[idx] > 0.0)
+                    || self.boundary.wall_east[idx]
+                    || self.boundary.wall_north[idx];
+                let p_new = if self.config.nonlinearity.beta > 0.0 && !is_solid_or_wall {
                     let beta = self.config.nonlinearity.beta;
                     let alpha = self.config.nonlinearity.alpha;
                     let kappa = self.config.nonlinearity.threshold_decay;

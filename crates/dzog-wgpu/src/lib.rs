@@ -6,4 +6,4 @@ pub mod simulation;
 
 pub use context::GpuContext;
 pub use renderer::GpuRenderer;
-pub use simulation::{GpuSimParams, GpuSimulation};
+pub use simulation::{GpuImpulseParams, GpuSimParams, GpuSimulation};

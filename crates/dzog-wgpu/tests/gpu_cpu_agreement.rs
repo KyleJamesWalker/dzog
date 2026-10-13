@@ -81,4 +81,14 @@ fn test_gate1_gpu_cpu_numerical_agreement() {
         max_vy_diff < 1e-4,
         "CPU and GPU vy should agree within numerical tolerance (got {max_vy_diff})"
     );
+
+    // 4. Verify GPU-native impulse injection without CPU readback
+    gpu_sim.inject_impulse_gpu(&ctx, 16.0, 16.0, 2.5, 2.0, 1.0, 0.0);
+    gpu_sim.step(&ctx, 4);
+    let post_impulse_state = gpu_sim.readback_state(&ctx);
+    let max_p_after = post_impulse_state.pressure.iter().copied().fold(0.0f32, f32::max);
+    assert!(
+        max_p_after > 0.5,
+        "GPU-native impulse shader must excite pressure and velocity on the GPU lattice (got {max_p_after})"
+    );
 }

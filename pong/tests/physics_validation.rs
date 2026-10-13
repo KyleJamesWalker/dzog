@@ -268,3 +268,125 @@ fn test_pixel_rasterization_and_energy() {
     // Hamiltonian field energy
     assert!(game.field_energy.total >= 0.0, "Total field energy must be non-negative");
 }
+
+#[test]
+fn test_no_one_hit_self_cleave_on_center_or_corner_strike() {
+    let mut game = BreakoutFieldGame::new(128, 80);
+    game.wave_force_enabled = true;
+
+    // Strike brick 24 on its extreme right corner (the worst case for the old self-cleave bug)
+    let target_idx = 24;
+    let target = game.bricks[target_idx];
+    let corner_x = (target.x + target.w) as f32;
+    let brick_bottom = (target.y + target.h) as f32;
+
+    game.ball_attached = false;
+    game.ball_x = corner_x;
+    game.ball_y = brick_bottom + 1.8;
+    game.ball_vx = -0.15;
+    game.ball_vy = -0.65;
+
+    let mut cracked = false;
+    for _ in 0..35 {
+        let ev = game.step();
+        if let StepEvent::BrickCracked { brick_idx, .. } = ev {
+            if brick_idx == target_idx {
+                cracked = true;
+            }
+        }
+        // As the ball rebounds away, the brick's own Hit-1 impact vibration must NEVER self-break it!
+        assert_ne!(
+            ev,
+            StepEvent::BrickBroken {
+                brick_idx: target_idx,
+                row: target.row,
+                remaining: 31
+            },
+            "Brick must never self-break from its own Hit-1 impact wave!"
+        );
+    }
+
+    assert!(cracked, "Corner strike must crack the brick on Hit 1");
+    assert_eq!(
+        game.bricks[target_idx].hits_left, 1,
+        "Brick must strictly remain at hits_left == 1 after rebounding away from Hit 1"
+    );
+}
+
+#[test]
+fn test_inter_brick_phonon_stress_transfer() {
+    let mut game = BreakoutFieldGame::new(128, 80);
+    let target_idx = 24;
+    let right_neighbor_idx = 25;
+
+    let initial_neighbor_cohesion = game.bricks[right_neighbor_idx].mean_cohesion();
+    assert_eq!(initial_neighbor_cohesion, 1.0);
+
+    // Transfer solid-state phonon stress from brick 24 to its neighbors
+    game.propagate_phonon_stress_to_neighbors(target_idx, 0.35);
+
+    let post_neighbor_cohesion = game.bricks[right_neighbor_idx].mean_cohesion();
+    assert!(
+        post_neighbor_cohesion < initial_neighbor_cohesion,
+        "Solid-state phonon coupling must pre-stress adjacent brick's facing edge"
+    );
+}
+
+#[test]
+fn test_paddle_doppler_overcharge_and_phase_pulse() {
+    let mut game = BreakoutFieldGame::new(128, 80);
+
+    // 1. Test coherent Phase-Pulse [W] discharge from paddle
+    assert!(game.phase_charge >= 30.0);
+    let fired = game.fire_phase_pulse();
+    assert!(fired, "Phase pulse should fire when charge >= 30");
+    let max_p = game.solver.state.pressure.iter().copied().fold(0.0f32, f32::max);
+    assert!(max_p > 1.5, "Phase pulse must inject directional wave packet above paddle");
+
+    // 2. Test Overcharged Ball single-hit shatter
+    let target_idx = 26;
+    let target = game.bricks[target_idx];
+    assert_eq!(target.hits_left, 2);
+
+    game.ball_attached = false;
+    game.ball_overcharged = true;
+    game.ball_x = target.x as f32 + target.w as f32 * 0.5;
+    game.ball_y = (target.y + target.h) as f32 + 1.8;
+    game.ball_vx = 0.0;
+    game.ball_vy = -0.75;
+
+    let mut shattered_in_one_hit = false;
+    for _ in 0..15 {
+        if let StepEvent::BrickBroken { brick_idx, .. } = game.step() {
+            if brick_idx == target_idx {
+                shattered_in_one_hit = true;
+                break;
+            }
+        }
+    }
+
+    assert!(
+        shattered_in_one_hit,
+        "Overcharged ball from Doppler paddle slice must shatter an intact crystal brick in 1 hit"
+    );
+    assert_eq!(game.bricks[target_idx].hits_left, 0);
+}
+
+#[test]
+fn test_gpu_accelerated_breakout_stepping() {
+    let mut game = BreakoutFieldGame::new(64, 40);
+    if !game.enable_gpu_acceleration() {
+        return;
+    }
+    assert!(game.is_gpu_accelerated());
+
+    game.serve();
+    for _ in 0..10 {
+        game.step();
+    }
+
+    assert!(
+        game.field_energy.total > 0.0,
+        "GPU-accelerated Breakout stepping must evolve field state and energy"
+    );
+}

@@ -22,11 +22,25 @@ pub struct GpuSimParams {
     pub _pad: f32,
 }
 
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+pub struct GpuImpulseParams {
+    pub width: u32,
+    pub height: u32,
+    pub center_x: f32,
+    pub center_y: f32,
+    pub two_sigma_sq: f32,
+    pub amplitude: f32,
+    pub dir_x: f32,
+    pub dir_y: f32,
+}
+
 pub struct GpuSimulation {
     pub width: u32,
     pub height: u32,
     pub params: GpuSimParams,
     pub params_buffer: Buffer,
+    pub impulse_buffer: Buffer,
 
     pub texture_a: Texture,
     pub view_a: TextureView,
@@ -41,9 +55,11 @@ pub struct GpuSimulation {
 
     pub velocity_pipeline: ComputePipeline,
     pub pressure_pipeline: ComputePipeline,
+    pub impulse_pipeline: ComputePipeline,
 
     pub bind_group_velocity: BindGroup,
     pub bind_group_pressure: BindGroup,
+    pub bind_group_impulse: BindGroup,
 
     pub staging_buffer: Buffer,
 }
@@ -87,6 +103,13 @@ impl GpuSimulation {
             mapped_at_creation: false,
         });
         ctx.queue.write_buffer(&params_buffer, 0, bytemuck::bytes_of(&params));
+
+        let impulse_buffer = ctx.device.create_buffer(&BufferDescriptor {
+            label: Some("Impulse Params Buffer"),
+            size: std::mem::size_of::<GpuImpulseParams>() as u64,
+            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
 
         let texture_desc = TextureDescriptor {
             label: Some("State Ping-Pong Texture"),
@@ -143,6 +166,11 @@ impl GpuSimulation {
         let press_shader = ctx.device.create_shader_module(ShaderModuleDescriptor {
             label: Some("Pressure Compute Shader"),
             source: ShaderSource::Wgsl(include_str!("shaders/pressure.wgsl").into()),
+        });
+
+        let impulse_shader = ctx.device.create_shader_module(ShaderModuleDescriptor {
+            label: Some("Impulse Compute Shader"),
+            source: ShaderSource::Wgsl(include_str!("shaders/impulse.wgsl").into()),
         });
 
         let bind_group_layout = ctx.device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -225,6 +253,67 @@ impl GpuSimulation {
             cache: None,
         });
 
+        let impulse_bind_group_layout = ctx.device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("Impulse Compute BindGroupLayout"),
+            entries: &[
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: false },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: false },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::StorageTexture {
+                        access: StorageTextureAccess::WriteOnly,
+                        format: TextureFormat::Rgba32Float,
+                        view_dimension: TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let impulse_pipeline_layout = ctx.device.create_pipeline_layout(&PipelineLayoutDescriptor {
+            label: Some("Impulse Compute Pipeline Layout"),
+            bind_group_layouts: &[&impulse_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+
+        let impulse_pipeline = ctx.device.create_compute_pipeline(&ComputePipelineDescriptor {
+            label: Some("Impulse Pipeline"),
+            layout: Some(&impulse_pipeline_layout),
+            module: &impulse_shader,
+            entry_point: Some("main"),
+            compilation_options: PipelineCompilationOptions::default(),
+            cache: None,
+        });
+
         // Pass 1 BindGroup: Read A -> Write B
         let bind_group_velocity = ctx.device.create_bind_group(&BindGroupDescriptor {
             label: Some("Velocity BindGroup (A -> B)"),
@@ -251,6 +340,18 @@ impl GpuSimulation {
             ],
         });
 
+        // Impulse BindGroup: Read A -> Write B (followed by copy B -> A)
+        let bind_group_impulse = ctx.device.create_bind_group(&BindGroupDescriptor {
+            label: Some("Impulse BindGroup (A -> B)"),
+            layout: &impulse_bind_group_layout,
+            entries: &[
+                BindGroupEntry { binding: 0, resource: impulse_buffer.as_entire_binding() },
+                BindGroupEntry { binding: 1, resource: BindingResource::TextureView(&view_a) },
+                BindGroupEntry { binding: 2, resource: BindingResource::TextureView(&material_view) },
+                BindGroupEntry { binding: 3, resource: BindingResource::TextureView(&view_b) },
+            ],
+        });
+
         // Staging buffer for readback
         let bytes_per_row = (w * 16 + 255) & !255; // WGPU row alignment: 256 bytes
         let staging_buffer = ctx.device.create_buffer(&BufferDescriptor {
@@ -265,6 +366,7 @@ impl GpuSimulation {
             height: h,
             params,
             params_buffer,
+            impulse_buffer,
             texture_a,
             view_a,
             texture_b,
@@ -275,8 +377,10 @@ impl GpuSimulation {
             boundary_view,
             velocity_pipeline,
             pressure_pipeline,
+            impulse_pipeline,
             bind_group_velocity,
             bind_group_pressure,
+            bind_group_impulse,
             staging_buffer,
         };
 
@@ -322,12 +426,13 @@ impl GpuSimulation {
     /// Upload material parameters to GPU Material Texture.
     pub fn upload_material(&self, ctx: &GpuContext, material: &MaterialField) {
         let count = material.config.cell_count();
+        let has_cohesion = material.cohesion.len() == count;
         let mut buffer = Vec::with_capacity(count * 4);
         for i in 0..count {
             buffer.push(material.density[i]);
             buffer.push(material.bulk_modulus[i]);
             buffer.push(material.damping[i]);
-            buffer.push(0.0f32);
+            buffer.push(if has_cohesion { material.cohesion[i] } else { 0.0f32 });
         }
 
         ctx.queue.write_texture(
@@ -349,6 +454,71 @@ impl GpuSimulation {
                 depth_or_array_layers: 1,
             },
         );
+    }
+
+    /// Inject a Gaussian or Directional wave packet directly on the GPU without CPU readback.
+    #[allow(clippy::too_many_arguments)]
+    pub fn inject_impulse_gpu(
+        &self,
+        ctx: &GpuContext,
+        center_x: f32,
+        center_y: f32,
+        sigma: f32,
+        amplitude: f32,
+        dir_x: f32,
+        dir_y: f32,
+    ) {
+        let impulse_params = GpuImpulseParams {
+            width: self.width,
+            height: self.height,
+            center_x,
+            center_y,
+            two_sigma_sq: 2.0 * sigma * sigma,
+            amplitude,
+            dir_x,
+            dir_y,
+        };
+        ctx.queue
+            .write_buffer(&self.impulse_buffer, 0, bytemuck::bytes_of(&impulse_params));
+
+        let workgroups_x = (self.width + 15) / 16;
+        let workgroups_y = (self.height + 15) / 16;
+
+        let mut encoder = ctx.device.create_command_encoder(&CommandEncoderDescriptor {
+            label: Some("GPU Impulse Excitation Encoder"),
+        });
+
+        {
+            let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+                label: Some("Impulse Pass (A -> B)"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.impulse_pipeline);
+            pass.set_bind_group(0, &self.bind_group_impulse, &[]);
+            pass.dispatch_workgroups(workgroups_x, workgroups_y, 1);
+        }
+
+        encoder.copy_texture_to_texture(
+            TexelCopyTextureInfo {
+                texture: &self.texture_b,
+                mip_level: 0,
+                origin: Origin3d::ZERO,
+                aspect: TextureAspect::All,
+            },
+            TexelCopyTextureInfo {
+                texture: &self.texture_a,
+                mip_level: 0,
+                origin: Origin3d::ZERO,
+                aspect: TextureAspect::All,
+            },
+            Extent3d {
+                width: self.width,
+                height: self.height,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        ctx.queue.submit(std::iter::once(encoder.finish()));
     }
 
     /// Upload boundary wall masks and velocities to GPU Boundary Texture.

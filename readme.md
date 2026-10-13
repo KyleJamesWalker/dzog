@@ -6,7 +6,7 @@ Conventional runtimes decompose reality into isolated object graphs, discrete st
 
 In Dzoglang, a program is not a sequence of instructions attached to objects—it is an **executable situation**: a Hamiltonian landscape of constitutive laws, heterogeneous material fields, boundary commitments, and excitations. Persistent entities (solitons, waveguides, structural bodies) emerge from local field relations, interfere across space, and exchange momentum without scene graphs or collision hierarchies.
 
-Read [philosophy.md](./philosophy.md) for the theoretical foundations (Hillman's situated image, Bohm-Hiley quantum potential, Dzogchen nonconceptual encounter) and [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) for the runtime architecture.
+Read [philosophy.md](./philosophy.md) for the theoretical foundations (Bohm-Hiley active information, Hillman's situated image, and living actor ecologies) and [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) for the runtime architecture.
 
 ---
 
@@ -57,18 +57,18 @@ $$f_{\text{nl}}(p) = \frac{\beta \, p}{1 + \alpha \, p^2} - \kappa \, p, \qquad 
 
 | Crate | Responsibility |
 | --- | --- |
-| `crates/dzog-core` | Reference Yee-staggered FDTD solver, nonlinear soliton law, Bohmian quantum potential $Q(\mathbf{x})$, heterogeneous material & cohesion fields, moving boundary conditions, Hamiltonian energy accounting, pressure probes, offline WAV synthesis, and RON `FieldSpec` / `Checkpoint` serialization. |
-| `crates/dzog-wgpu` | GPU-native compute pipeline (`velocity.wgsl`, `pressure.wgsl`, `render.wgsl`) over ping-pong `RGBA32Float` state textures, material/boundary textures, and asynchronous staging readback with verified CPU/GPU agreement ($< 10^{-4}$). |
-| `crates/dzog-app` | Standalone `winit` + `wgpu` interactive acoustic lattice instrument for real-time GPU wave excitation and boundary inspection. |
-| `pong` | **Field-First Soliton Breakout**: Bevy 0.15 interactive demonstration of wave-matter coupling, Bohmian + radiation-pressure guidance, point-of-impact structural fracturing, acoustic resonance cleaving, and counterfactual checkpoint branching. |
+| `crates/dzog-core` | Reference Yee-staggered FDTD solver, nonlinear soliton law, Bohmian quantum potential $Q(\mathbf{x})$, vorticity $\nabla \times \mathbf{v}$, heterogeneous material & cohesion fields, moving boundary conditions, Hamiltonian energy accounting, pressure probes, offline WAV synthesis, and RON `FieldSpec` / `Checkpoint` serialization. |
+| `crates/dzog-wgpu` | GPU-native compute pipeline (`velocity.wgsl`, `pressure.wgsl`, `impulse.wgsl`, `render.wgsl`) over ping-pong `RGBA32Float` state textures, material/boundary textures, GPU-side Bohmian potential $Q$ evaluation, zero-readback GPU impulse injection, and verified CPU/GPU agreement ($< 10^{-4}$). |
+| `crates/dzog-app` | Standalone `winit` + `wgpu` interactive lattice instrument for real-time GPU wave excitation and boundary inspection. |
+| `pong` | **Solid-State & Quantum-Vacuum Breakout**: Bevy 0.15 + WGPU compute demonstration of solid-state crystalline phonon coupling, point-of-impact cleavage planes, sympathetic crystal cascades, Paddle Doppler Overcharge, coherent Phase-Pulse wave-casting, and counterfactual checkpoint branching. |
 
 ### GPU Compute Pipeline (`dzog-wgpu`)
 
 ```text
-validated FieldSpec / step-indexed interventions
+validated FieldSpec / GPU impulse shader (impulse.wgsl)
           |
           v
-Rust scheduler -> WGPU compute substeps (Pass 1: Velocity A->B, Pass 2: Pressure B->A)
+Rust scheduler -> WGPU compute substeps (Pass 1: Velocity + Bohmian Q, Pass 2: Pressure + Soliton Flux)
                                       |                             |
                                       v                             v
                                pressure probes               fullscreen shader
@@ -79,8 +79,8 @@ Rust scheduler -> WGPU compute substeps (Pass 1: Velocity A->B, Pass 2: Pressure
 
 | GPU Resource | Format | Packed Channels |
 | --- | --- | --- |
-| `State A / B` | `RGBA32Float` | `(p_center, vx_east, vy_north, _)` |
-| `Material` | `RGBA32Float` | `(density_rho, bulk_modulus_K, damping_gamma, _)` |
+| `State A / B` | `RGBA32Float` | `(p_center, vx_east, vy_north, q_bohmian)` |
+| `Material` | `RGBA32Float` | `(density_rho, bulk_modulus_K, damping_gamma, cohesion_C)` |
 | `Boundary` | `RGBA32Float` | `(wall_east_mask, wall_vx, wall_north_mask, wall_vy)` |
 
 ---
@@ -88,13 +88,13 @@ Rust scheduler -> WGPU compute substeps (Pass 1: Velocity A->B, Pass 2: Pressure
 ## Running the Runtime & Demos
 
 ```bash
-# Run the full verification suite (21 unit, analytical gate, GPU/CPU agreement, and physics tests)
+# Run the full verification suite (25 unit, analytical gate, GPU/CPU agreement, and physics tests)
 cargo test --workspace
 
-# Launch the Field-First Soliton Breakout demo (Bevy 0.15 GUI)
+# Launch the Solid-State & Quantum-Vacuum Breakout demo (Bevy 0.15 GUI)
 cargo run -p pong
 
-# Run the headless FDTD solver & rasterizer throughput benchmark
+# Run the headless WGPU compute + CPU FDTD solver & rasterizer benchmark
 cargo run -p pong -- --bench
 
 # Launch the native WGPU compute field instrument
@@ -113,13 +113,26 @@ A screenshot or color bitmap is not a program. Dzoglang distinguishes three seri
 
 ---
 
-## Platform Roadmap & Research Directions
+## Platform Roadmap: Toward a General 2D Field-Physics Game Engine
 
-1. **Multi-Component Spinor & Complex Wavefields**: Extending the real scalar-vector lattice $(p, \mathbf{v})$ to complex-valued Gross-Pitaevskii / nonlinear Schrödinger condensates ($\psi \in \mathbb{C}$) supporting quantized vortices and topological defects.
-2. ** Elastodynamic Stress Tensors**: Expanding scalar bulk modulus $K$ and cohesion $C$ into full 2D Cauchy stress and shear strain tensors $(\sigma_{xx}, \sigma_{yy}, \sigma_{xy})$ for anisotropic wave propagation and plastic deformation.
-3. **Gauge-Coupled Potentials**: Introducing synthetic vector potentials $\mathbf{A}(\mathbf{x}, t)$ on lattice links (Peierls substitution) to model Lorentz-like chiral wave deflection and non-reciprocal metamaterials.
-4. **Asynchronous GPU-to-Audio Sonification**: Completing the lock-free SPSC ring pipeline from GPU probe storage buffers to `cpal` at 48 kHz (`dt_sample = a / Fs`), unifying visual and audible observation of the same evolving field state.
-5. **Situated Composition & Fragment Algebra**: Formalizing boundary impedance matching and scale invariants when composing reusable field fragments across heterogeneous parent landscapes.
+Rather than duplicating generic ECS, windowing, or UI layers already provided by host frameworks like Bevy, Dzoglang focuses strictly on the **core GPU field solver, wave-matter physics, and shader presentation pipeline** required to power genres such as **2D Shmups**, **Asteroids**, and **Star Control** arena/exploration games:
+
+1. **Free-Rotating Cohesive Bodies & Topological Cleaving (*Asteroids* / Destructible Hulls)**:
+   - Generalize axis-aligned boundary masks into a GPU **rotating local-grid body rasterizer** with full linear and angular momentum $(\mathbf{P}, L_z)$.
+   - Integrate boundary radiation pressure and shear stress over arbitrary hull contours ($\mathbf{F} = -\oint p\,\mathbf{n}\,dl$, $\tau = -\oint (\mathbf{r} \times p\,\mathbf{n})\,dl$) so off-center impacts and thruster firing naturally impart torque and spin.
+   - Add **connected-component fracture splitting**: when a crystalline asteroid or ship wing is cleaved all the way through ($C(\mathbf{x}) \to 0$), split the body mask into independent tumbling child fragments conserving local momentum.
+2. **Toroidal, Advected, & Sparse-Tiled World Lattices (*Star Control* / Scrolling Shmups)**:
+   - Couple `OuterBoundaryRule::Periodic` with seamless cross-border body wrapping for classic toroidal arenas (*Asteroids* / *Star Control* Super Melee).
+   - Implement **camera-centered lattice advection** (toroidal ring-buffer shifting with outer `AbsorbingSponge` layers) and **sparse GPU tile paging** so a high-resolution local PDE field tracks ships across unbounded space or scrolling shmup stages without $O(\text{world area})$ memory cost.
+3. **Multi-Field Channels: Gravity Wells, Plasma Solitons, & Interference Shields**:
+   - **Long-Range Potential Layer ($\Phi_g, Q$)**: Fast GPU Poisson/multigrid relaxation for planetary gravity wells (*Star Control* orbital slingshots) and Bohmian attractor anomalies.
+   - **Coherent Weaponry & Wave Interference (*Shmups*)**: Directional soliton projectiles, continuous beam waveguides, and phase-tuned energy shields where players can use **destructive wave interference** to cancel incoming wave-bullets or refract beams through metamaterial prisms.
+   - **Reaction Thruster Plumes**: Propel ships by injecting directional momentum flux ($v_n, p$) into the lattice—exhaust plumes physically push nearby asteroid debris, deflect incoming projectiles, and stress adjacent hulls.
+4. **Zero-Readback GPU Pipeline & Direct Shader Compositing**:
+   - Eliminate per-frame CPU `readback_state` stalls so grids scale to $512 \times 512+$ at $120\text{ Hz}$.
+   - Run a **GPU Force & Fracture Reduction Pass** that writes net hull forces/torques and cell damage directly into a compact GPU storage buffer, and composite the field, Bohmian ridges, and crystalline hulls directly into a shared Bevy/WGPU render texture via WGSL shaders.
+5. **Live GPU-to-Audio Field Sonification**:
+   - Stream pressure histories from cockpit/listener GPU probe buffers through a lock-free SPSC ring to `cpal`, generating authentic Doppler flybys, hull resonance, shield harmonics, and cavitation explosions directly from the PDE state.
 
 ---
 

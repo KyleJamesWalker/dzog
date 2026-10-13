@@ -204,10 +204,9 @@ fn inject_brush_at_cursor(state: &mut AppState, amplitude: f32) {
     let cx = state.cursor_pos.0 * state.width as f32;
     let cy = state.cursor_pos.1 * state.height as f32;
 
-    let mut current_state = state.sim.readback_state(&state.ctx);
-    let impulse = GaussianImpulse::new(cx, cy, 3.0, amplitude);
-    impulse.inject(&mut current_state);
-    state.sim.upload_state(&state.ctx, &current_state);
+    state
+        .sim
+        .inject_impulse_gpu(&state.ctx, cx, cy, 3.0, amplitude, 0.0, 0.0);
 }
 
 fn main() {

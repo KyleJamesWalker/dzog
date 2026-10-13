@@ -108,6 +108,27 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
     }
 
-    // Write updated state: pressure preserved, new velocities
-    textureStore(state_out, coord, vec4<f32>(p_center, vx_new, vy_new, 0.0));
+    // --- Bohm-Hiley Quantum Potential Q = -Laplacian(R) / R ---
+    var q_bohm = 0.0;
+    if (x > 0u && x + 1u < params.width && y > 0u && y + 1u < params.height) {
+        let eps_sq = 0.0064; // (0.08)^2
+        let p_e = textureLoad(state_in, vec2<i32>(i32(x + 1u), i32(y)), 0).r;
+        let p_w = textureLoad(state_in, vec2<i32>(i32(x - 1u), i32(y)), 0).r;
+        let p_n = textureLoad(state_in, vec2<i32>(i32(x), i32(y + 1u)), 0).r;
+        let p_s = textureLoad(state_in, vec2<i32>(i32(x), i32(y - 1u)), 0).r;
+
+        let r_c = sqrt(p_center * p_center + eps_sq);
+        let r_e = sqrt(p_e * p_e + eps_sq);
+        let r_w = sqrt(p_w * p_w + eps_sq);
+        let r_n = sqrt(p_n * p_n + eps_sq);
+        let r_s = sqrt(p_s * p_s + eps_sq);
+
+        let inv_dx2 = params.inv_dx * params.inv_dx;
+        let inv_dy2 = params.inv_dy * params.inv_dy;
+        let lap_r = (r_e - 2.0 * r_c + r_w) * inv_dx2 + (r_n - 2.0 * r_c + r_s) * inv_dy2;
+        q_bohm = -lap_r / r_c;
+    }
+
+    // Write updated state: pressure preserved, new velocities, Bohmian potential Q in .a
+    textureStore(state_out, coord, vec4<f32>(p_center, vx_new, vy_new, q_bohm));
 }

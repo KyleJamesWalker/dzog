@@ -34,6 +34,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let coord = vec2<i32>(i32(x), i32(y));
     let cur_state = textureLoad(state_in, coord, 0);
     let cur_mat = textureLoad(material, coord, 0);
+    let cur_bound = textureLoad(boundary, coord, 0);
 
     let vx_e = cur_state.g;
     let vy_n = cur_state.b;
@@ -71,12 +72,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     let p_linear = decay * cur_state.r - (k * params.dt) * div_v;
 
+    let is_solid_or_wall = cur_mat.a > 0.0 || cur_bound.r > 0.5 || cur_bound.b > 0.5;
     var p_new = p_linear;
-    if (params.beta > 0.0) {
+    if (params.beta > 0.0 && !is_solid_or_wall) {
         let nl_flux = (params.beta * p_linear) / (1.0 + params.alpha * p_linear * p_linear) - params.threshold_decay * p_linear;
         p_new = p_linear + nl_flux * params.dt;
     }
 
-    // Write updated state: new pressure, preserved velocities
-    textureStore(state_out, coord, vec4<f32>(p_new, vx_e, vy_n, 0.0));
+    // Write updated state: new pressure, preserved velocities, preserved Bohmian Q in .a
+    textureStore(state_out, coord, vec4<f32>(p_new, vx_e, vy_n, cur_state.a));
 }

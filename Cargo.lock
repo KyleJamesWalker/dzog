@@ -3173,8 +3173,10 @@ dependencies = [
  "bevy",
  "crossterm",
  "dzog-core",
+ "dzog-wgpu",
  "env_logger",
  "log",
+ "pollster",
 ]
 
 [[package]]

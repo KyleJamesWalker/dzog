@@ -180,4 +180,21 @@ impl AcousticState {
         let p = self.pressure[idx];
         (p * self.vx[idx], p * self.vy[idx])
     }
+
+    /// 2D scalar vorticity (curl of particle velocity: dv_y/dx - dv_x/dy) at interior cell (x, y).
+    #[inline]
+    pub fn vorticity_at(&self, x: usize, y: usize) -> f32 {
+        let w = self.config.width;
+        let h = self.config.height;
+        if x + 1 >= w || y + 1 >= h {
+            return 0.0;
+        }
+        let idx = self.config.index(x, y);
+        let idx_r = self.config.index(x + 1, y);
+        let idx_t = self.config.index(x, y + 1);
+
+        let dvy_dx = (self.vy[idx_r] - self.vy[idx]) / self.config.dx;
+        let dvx_dy = (self.vx[idx_t] - self.vx[idx]) / self.config.dy;
+        dvy_dx - dvx_dy
+    }
 }
