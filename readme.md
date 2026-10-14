@@ -9,13 +9,17 @@ Conventional game engines treat space as an empty coordinate system populated by
 
 In Dzog Simulator, a scene is an **executable physical situation**: a lattice where every cell carries pressure, velocity, material impedance, and structural cohesion. Ships, destructible asteroids, projectiles, and shields are persistent patterns of matter and wave excitation that radiate wakes, fracture along continuous stress planes, and interfere directly across the medium.
 
-### Demo: Asteroids
+## Interactive Demos
 
-Play the browser demo at [https://jadbox.github.io/dzog/asteroids/)](https://jadbox.github.io/dzog/asteroids/) or watch the video below:
+### 1. Crystalline Asteroids & Alien Ecology
+> **Live Web Demo:** [**Play in Browser (`jadbox.github.io/dzog/asteroids/`)**](https://jadbox.github.io/dzog/asteroids/)  
+> Toroidal & gravity-well wave mechanics, topological BFS crystal cleaving, antiphase shields, and Bohm-Hiley pilot-wave navigation.
 
 https://github.com/user-attachments/assets/63759ad7-6401-47e1-8674-87e3e15a4092
 
-### Demo: Retro space shooter
+### 2. Crystalline Corridor (Vertical Wave-Stream Shmup)
+> **Live Web Demo:** [**Play in Browser (`jadbox.github.io/dzog/shmup/`)**](https://jadbox.github.io/dzog/shmup/)  
+> Expands the ecology into a scrolling metamaterial canyon: a situated **Tri-Lobe Crystalline Ship** (where wing lobes physically sever and re-crystallize instead of using integer hitpoints), **Chladni Pilot-Wave Swarms** surfing $-\nabla Q$ standing-wave pockets, and contested **Annealing Power Cubes** ($\Delta C > 0$).
 
 https://github.com/user-attachments/assets/718eeba3-4bc6-4f00-a8dc-97c151ca4618
 
