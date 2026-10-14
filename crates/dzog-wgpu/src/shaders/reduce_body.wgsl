@@ -109,6 +109,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 fx_total += dfx;
                 fy_total += dfy;
                 tau_total += rx * dfy - ry * dfx;
+            } else if (q.radius <= 3.2 && p_abs > 0.015) {
+                let q_fx = -(s_e.a - s_w.a) * 0.5 * params.inv_dx;
+                let q_fy = -(s_n.a - s_s.a) * 0.5 * params.inv_dy;
+                let dfx = q_fx * 0.045;
+                let dfy = q_fy * 0.045;
+
+                fx_total += dfx;
+                fy_total += dfy;
+                tau_total += rx * dfy - ry * dfx;
             }
         }
     }

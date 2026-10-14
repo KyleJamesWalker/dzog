@@ -447,3 +447,82 @@ impl SolitonCarrierPulse {
         }
     }
 }
+
+/// Chladni Pilot-Wave Swarm Carrier (`philosophy.md` §Bohm-Hiley Active Information).
+///
+/// Radiates a multi-lobed standing-wave interference lattice around a matriarch cruiser.
+/// Swarm drones and piezo power-cubes experience no scripted spline choreography; they are
+/// organized by the resulting Bohmian quantum potential minima (`-grad Q`).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ChladniCarrierEmitter {
+    pub center_x: f32,
+    pub center_y: f32,
+    pub radius: f32,
+    pub radial_k: f32,
+    pub angular_m: f32,
+    pub phase: f32,
+    pub amplitude: f32,
+}
+
+impl ChladniCarrierEmitter {
+    pub fn new(
+        center_x: f32,
+        center_y: f32,
+        radius: f32,
+        radial_k: f32,
+        angular_m: f32,
+        phase: f32,
+        amplitude: f32,
+    ) -> Self {
+        Self {
+            center_x,
+            center_y,
+            radius: radius.max(3.0),
+            radial_k,
+            angular_m,
+            phase,
+            amplitude,
+        }
+    }
+
+    /// Inject a bounded Chladni standing-wave carrier into the lattice.
+    pub fn inject(&self, state: &mut AcousticState, periodic: bool) {
+        let w = state.config.width as isize;
+        let h = state.config.height as isize;
+        let r_bound = self.radius.ceil() as isize;
+        let r_sq_max = self.radius * self.radius;
+        let cx = self.center_x.round() as isize;
+        let cy = self.center_y.round() as isize;
+        let has_lum = state.luminescence.len() == (w as usize) * (h as usize);
+
+        for oy in -r_bound..=r_bound {
+            for ox in -r_bound..=r_bound {
+                let px = cx + ox;
+                let py = cy + oy;
+                if !periodic && (px < 1 || px >= w - 1 || py < 1 || py >= h - 1) {
+                    continue;
+                }
+                let dx = px as f32 - self.center_x;
+                let dy = py as f32 - self.center_y;
+                let r_sq = dx * dx + dy * dy;
+                if r_sq > r_sq_max || r_sq < 2.25 {
+                    continue;
+                }
+
+                let r = r_sq.sqrt();
+                let theta = dy.atan2(dx);
+                let env = (1.0 - r / self.radius).powi(2);
+                let mode = (self.radial_k * r - self.phase).cos() * (self.angular_m * theta).cos();
+                let p_drive = self.amplitude * env * mode;
+
+                let gx = px.rem_euclid(w) as usize;
+                let gy = py.rem_euclid(h) as usize;
+                let idx = state.config.index(gx, gy);
+                state.pressure[idx] = (state.pressure[idx] + p_drive).clamp(-3.5, 3.5);
+                if has_lum {
+                    state.luminescence[idx] = (state.luminescence[idx] + p_drive.abs() * 0.22).min(4.0);
+                }
+            }
+        }
+    }
+}

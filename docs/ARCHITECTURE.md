@@ -59,6 +59,8 @@ Instead of terminal ASCII, the engine renders directly to **pixels and shaders**
   [`crates/dzog-bevy/src/lib.rs`](../crates/dzog-bevy/src/lib.rs) and [`crates/dzog-wgpu`](../crates/dzog-wgpu) require a WGPU-capable GPU (`GpuContext::shared()`), executing all FDTD substeps (`velocity.wgsl`, `pressure.wgsl`, `luminescence.wgsl`) and body force reductions (`reduce_body.wgsl`) on the GPU.
 - **Asteroids Tech Demo (`asteroids/`)**:
   Runs on a `240×150` periodic/gravity-well lattice in a `1600×1000` window with 3D-faceted mineralogical asteroids (`PiezoQuartz`, `ObsidianAnvil`, `BismuthCrystal`), continuous `SolitonCarrierPulse` laser luminescence, ship-like `BohmianSaucer` corvettes & `HarmonicWeaver` cruisers, player-like autopilot (`asteroids/src/autopilot.rs`, `[T]` / `--autopilot`), and `ffmpeg` MP4 recording (`--record [file.mp4] --duration <secs>`).
+- **Crystalline Corridor Shmup (`crates/shmup/`)**:
+  Vertical wave-stream shooter on a `240×150` scrolling metamaterial canyon lattice. Replaces integer hitpoints (`hp: 3`) with a situated **Tri-Lobe Crystalline Ship** (`CohesiveBody::new_trilobe_ship`—Port Wing, Central Core, Starboard Wing), spline-free **Chladni Pilot-Wave Swarms** (`ChladniCarrierEmitter` + $-\nabla Q$ nodal surfing), and contested **Annealing Piezo Power-Cubes** (`CohesiveBody::anneal_cells`, $\Delta C > 0$) that regrow severed crystal lobes for whichever ship (player or alien) captures them.
 - **Live Binaural & Modal Audio (`bevy_audio`)**:
    Cockpits and paddles sample local lattice oscillations into `FieldModalSynthesizer` (`Decodable`).
 

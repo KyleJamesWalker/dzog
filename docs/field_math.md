@@ -46,6 +46,7 @@ Unlike classical radiation pressure ($\mathbf{F}_p = -\nabla p$), which scales w
 - Constructive interference ridges and standing-wave channels create negative $Q$ valleys ($\nabla^2 R > 0 \implies Q < 0$).
 - Field-coupled actors experience the combined guidance law:
   $$\mathbf{F}_{\text{total}} = -\kappa_p \nabla p - \kappa_Q \nabla Q - m \nabla \Phi_g$$
+- **Chladni Pilot-Wave Carriers (`ChladniCarrierEmitter`)**: Matriarch cruisers radiate multi-lobed standing-wave envelopes $p_{\text{carrier}}(r, \theta, t) = A (1 - r/R_0)^2 \cos(k_r r - \phi)\cos(m \theta)$. Lightweight swarm drones and piezoelectric micro-cubes ($r \le 3.2$) integrate $-\nabla Q$ directly in `reduce_body.wgsl` even at low pressure amplitudes ($|p| > 0.015$), surfing nodal valleys without scripted splines.
 
 ---
 
@@ -91,6 +92,8 @@ $$p_{i,j}^{n+1} = p_{\text{lin}; i,j}^{n+1} + \Delta t \, f_{\text{nl}}\!\left(p
 When $|p_{i,j}^{n+1}| > p_{\text{yield}; i,j}$, local structural cohesion erodes continuously:
 
 $$C_{i,j}^{n+1} = \max\!\left(0, \; C_{i,j}^n - \eta_{\text{erode}} \left(|p_{i,j}^{n+1}| - p_{\text{yield}; i,j}\right) \Delta t\right)$$
+
+Conversely, when a damaged `CohesiveBody` captures an annealing piezoelectric condensate ("Power Cube"), reversible **exciton annealing** ($\Delta C > 0$, `CohesiveBody::anneal_cells`) restores $C(\text{lx}, \text{ly}) \to 1.0$ radially outward from the body's core, sealing internal fracture waveguides and re-crystallizing severed structural lobes.
 
 ### Pass 3: Screened Reaction-Diffusion Luminescence Update (`luminescence.wgsl`)
 

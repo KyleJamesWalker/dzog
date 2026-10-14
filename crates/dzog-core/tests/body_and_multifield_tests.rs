@@ -159,3 +159,45 @@ fn test_poisson_gravity_well_and_binaural_doppler_sonification() {
         slow_sonifier.doppler_freq
     );
 }
+
+#[test]
+fn test_trilobe_ship_cleaving_annealing_and_chladni_bohmian_guidance() {
+    let grid = GridConfig::new(64, 64, 1.0, 1.0);
+    let mut state = AcousticState::new(grid);
+
+    // 1. Tri-Lobe Crystalline Ship starts with all 3 lobes intact (Port, Core, Starboard)
+    let mut ship = CohesiveBody::new_trilobe_ship(1, 32.0, 16.0, 6.5);
+    assert_eq!(ship.intact_lobe_count(), 3, "Fresh Tri-Lobe ship must have 3 intact lobes");
+    let initial_mass = ship.mass;
+
+    // 2. Hit 1 severs Port Wing (-1) -> 2 lobes remain, mass decreases
+    ship.sever_trilobe_section(-1);
+    assert_eq!(ship.intact_lobe_count(), 2, "Severing port wing must leave 2 intact lobes");
+    assert!(ship.mass < initial_mass, "Severing a wing must reduce physical hull mass");
+
+    // 3. Hit 2 severs Starboard Wing (+1) -> 1 lobe (Central Core) remains
+    ship.sever_trilobe_section(1);
+    assert_eq!(ship.intact_lobe_count(), 1, "Severing starboard wing must leave 1 intact core lobe");
+
+    // 4. Exciton Annealing from Power Cubes regrows severed wing lobes from core outward
+    let healed = ship.anneal_cells(35.0);
+    assert!(healed > 10, "Annealing must restore eroded/cavitated crystal cells");
+    assert!(
+        ship.intact_lobe_count() >= 2,
+        "Annealing must regrow at least one severed wing lobe (got {})",
+        ship.intact_lobe_count()
+    );
+    ship.anneal_cells(60.0);
+    assert_eq!(ship.intact_lobe_count(), 3, "Full annealing must restore all 3 structural lobes");
+
+    // 5. Chladni Pilot-Wave Carrier creates non-zero Bohmian guidance force (-grad Q) on a Power Cube
+    let emitter = ChladniCarrierEmitter::new(32.0, 32.0, 18.0, 0.55, 3.0, 0.0, 0.45);
+    emitter.inject(&mut state, false);
+
+    let mut cube = CohesiveBody::new_power_cube(99, 26.5, 30.0);
+    let (fx, fy, _tau) = cube.integrate_field_forces(&state, 0.25, false);
+    assert!(
+        fx * fx + fy * fy > 1e-6,
+        "Chladni standing-wave carrier must exert non-zero Bohmian guidance force on Power Cube (fx={fx}, fy={fy})"
+    );
+}

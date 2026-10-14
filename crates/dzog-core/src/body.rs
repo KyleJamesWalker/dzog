@@ -272,6 +272,243 @@ impl CohesiveBody {
         body
     }
 
+    /// Generate a Tri-Lobe Crystalline Interceptor hull (Port Wing, Central Core, Starboard Wing).
+    ///
+    /// Replaces discrete hitpoint counters (`hp: 3`) with a situated 3-lobe crystal structure:
+    /// - Central Core (`|lx - center| <= core_half_w`)
+    /// - Port Wing (`lx < center - core_half_w`)
+    /// - Starboard Wing (`lx > center + core_half_w`)
+    pub fn new_trilobe_ship(id: u32, x: f32, y: f32, outer_radius: f32) -> Self {
+        let local_size = ((outer_radius * 2.4).ceil() as usize).clamp(13, 21);
+        let count = local_size * local_size;
+        let mut occupied = vec![false; count];
+        let mut cohesion = vec![0.0f32; count];
+        let center = (local_size as f32 - 1.0) * 0.5;
+
+        for ly in 0..local_size {
+            for lx in 0..local_size {
+                let dx = lx as f32 - center;
+                let dy = ly as f32 - center;
+                // Nose points toward screen-top (-Y); aft thrusters sit toward screen-bottom (+Y)
+                let up = -dy;
+                let in_core = dx.abs() <= outer_radius * 0.34
+                    && up >= -outer_radius * 0.72
+                    && up <= outer_radius * 0.95
+                    && (dx.abs() * 1.4 + up.max(0.0) * 0.55) <= outer_radius * 0.88;
+                // Swept port and starboard resonator wings connected by narrow crystal necks
+                let wing_up_center = -outer_radius * 0.10 - (dx.abs() - outer_radius * 0.34).max(0.0) * 0.25;
+                let in_wing = dx.abs() > outer_radius * 0.34
+                    && dx.abs() <= outer_radius * 1.02
+                    && (up - wing_up_center).abs() <= outer_radius * 0.42;
+
+                if in_core || in_wing {
+                    let idx = ly * local_size + lx;
+                    occupied[idx] = true;
+                    // Structural neck joints between wings and fuselage have slightly lower yield
+                    // so wing hits cleanly sever the wing lobe before cavitating the core.
+                    let is_neck = (dx.abs() - outer_radius * 0.38).abs() <= 0.75;
+                    cohesion[idx] = if is_neck { 0.86 } else { 1.0 };
+                }
+            }
+        }
+
+        let mut body = Self {
+            id,
+            x,
+            y,
+            vx: 0.0,
+            vy: 0.0,
+            theta: 0.0,
+            omega: 0.0,
+            local_size,
+            occupied,
+            cohesion,
+            material: BodyMaterialSpec::for_class(MineralClass::PiezoQuartz),
+            mass: 1.0,
+            inertia: 1.0,
+            radius: outer_radius,
+            last_fracture_step: None,
+        };
+        body.recompute_mass_properties();
+        body
+    }
+
+    /// Generate a compact Piezo-Quartz annealing condensate ("Power Cube").
+    pub fn new_power_cube(id: u32, x: f32, y: f32) -> Self {
+        let local_size = 6;
+        let count = local_size * local_size;
+        let mut occupied = vec![false; count];
+        let mut cohesion = vec![0.0f32; count];
+        let center = (local_size as f32 - 1.0) * 0.5;
+
+        for ly in 0..local_size {
+            for lx in 0..local_size {
+                let dx = (lx as f32 - center).abs();
+                let dy = (ly as f32 - center).abs();
+                if dx <= 1.8 && dy <= 1.8 {
+                    let idx = ly * local_size + lx;
+                    occupied[idx] = true;
+                    cohesion[idx] = 1.0;
+                }
+            }
+        }
+
+        let mut body = Self {
+            id,
+            x,
+            y,
+            vx: 0.0,
+            vy: 0.0,
+            theta: 0.35,
+            omega: 0.04,
+            local_size,
+            occupied,
+            cohesion,
+            material: BodyMaterialSpec::for_class(MineralClass::PiezoQuartz),
+            mass: 1.0,
+            inertia: 1.0,
+            radius: 2.2,
+            last_fracture_step: None,
+        };
+        body.recompute_mass_properties();
+        body
+    }
+
+    /// Inspect structural integrity of a Tri-Lobe hull: `(port_wing_intact, core_intact, starboard_wing_intact)`.
+    pub fn trilobe_status(&self) -> (bool, bool, bool) {
+        let center = (self.local_size as f32 - 1.0) * 0.5;
+        let neck_x = self.radius * 0.34;
+        let mut port_active = 0usize;
+        let mut port_total = 0usize;
+        let mut core_active = 0usize;
+        let mut core_total = 0usize;
+        let mut star_active = 0usize;
+        let mut star_total = 0usize;
+
+        for ly in 0..self.local_size {
+            for lx in 0..self.local_size {
+                let idx = ly * self.local_size + lx;
+                if !self.occupied[idx] {
+                    continue;
+                }
+                let dx = lx as f32 - center;
+                let active = self.cohesion[idx] >= 0.35;
+                if dx < -neck_x {
+                    port_total += 1;
+                    if active {
+                        port_active += 1;
+                    }
+                } else if dx > neck_x {
+                    star_total += 1;
+                    if active {
+                        star_active += 1;
+                    }
+                } else {
+                    core_total += 1;
+                    if active {
+                        core_active += 1;
+                    }
+                }
+            }
+        }
+
+        let port_ok = port_total > 0 && port_active * 2 >= port_total;
+        let core_ok = core_total > 0 && core_active * 3 >= core_total;
+        let star_ok = star_total > 0 && star_active * 2 >= star_total;
+        (port_ok, core_ok, star_ok)
+    }
+
+    /// Count intact structural lobes in `[0, 3]` for a Tri-Lobe hull.
+    pub fn intact_lobe_count(&self) -> u32 {
+        let (p, c, s) = self.trilobe_status();
+        if !c {
+            0
+        } else {
+            1 + u32::from(p) + u32::from(s)
+        }
+    }
+
+    /// Sever a single structural lobe (`-1` = Port Wing, `1` = Starboard Wing, `0` = Central Core)
+    /// via acoustic overpressure cavitation, returning the world coordinates of the severed lobe centroid.
+    pub fn sever_trilobe_section(&mut self, lobe_sign: i32) -> (f32, f32) {
+        let center = (self.local_size as f32 - 1.0) * 0.5;
+        let neck_x = self.radius * 0.32;
+        let mut sum_lx = 0.0f32;
+        let mut sum_ly = 0.0f32;
+        let mut cnt = 0usize;
+
+        for ly in 0..self.local_size {
+            for lx in 0..self.local_size {
+                let idx = ly * self.local_size + lx;
+                if !self.occupied[idx] {
+                    continue;
+                }
+                let dx = lx as f32 - center;
+                let match_lobe = match lobe_sign.cmp(&0) {
+                    std::cmp::Ordering::Less => dx < -neck_x,
+                    std::cmp::Ordering::Greater => dx > neck_x,
+                    std::cmp::Ordering::Equal => dx.abs() <= neck_x,
+                };
+                if match_lobe && self.cohesion[idx] > 0.0 {
+                    self.cohesion[idx] = 0.0;
+                    sum_lx += lx as f32;
+                    sum_ly += ly as f32;
+                    cnt += 1;
+                }
+            }
+        }
+
+        self.recompute_mass_properties();
+        if cnt > 0 {
+            self.local_to_world(sum_lx / cnt as f32, sum_ly / cnt as f32)
+        } else {
+            (self.x, self.y)
+        }
+    }
+
+    /// Exciton crystal annealing (reversible phase transition: `Delta C > 0`).
+    ///
+    /// Absorbing an annealing piezo-condensate ("Power Cube") restores eroded cohesion `C(lx, ly)`
+    /// from the core outward, sealing internal fracture waveguides and regrowing severed wing lobes.
+    /// Returns the number of cells restored or regrown.
+    pub fn anneal_cells(&mut self, cohesion_budget: f32) -> usize {
+        let center = (self.local_size as f32 - 1.0) * 0.5;
+        let mut candidates: Vec<(usize, f32)> = Vec::new();
+
+        for ly in 0..self.local_size {
+            for lx in 0..self.local_size {
+                let idx = ly * self.local_size + lx;
+                if self.occupied[idx] && self.cohesion[idx] < 0.99 {
+                    let dx = lx as f32 - center;
+                    let dy = ly as f32 - center;
+                    let dist = (dx * dx + dy * dy).sqrt();
+                    candidates.push((idx, dist));
+                }
+            }
+        }
+
+        // Regrow from core outward so structural necks bond before outer wingtips
+        candidates.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+
+        let mut remaining = cohesion_budget.max(0.0);
+        let mut healed_cells = 0usize;
+        for (idx, _) in candidates {
+            if remaining <= 0.001 {
+                break;
+            }
+            let deficit = (1.0 - self.cohesion[idx]).max(0.0);
+            let add = deficit.min(remaining);
+            if add > 0.0 {
+                self.cohesion[idx] = (self.cohesion[idx] + add).min(1.0);
+                remaining -= add;
+                healed_cells += 1;
+            }
+        }
+
+        self.recompute_mass_properties();
+        healed_cells
+    }
+
     /// Number of active cells with cohesion >= 0.15.
     pub fn active_cell_count(&self) -> usize {
         self.occupied
@@ -570,6 +807,7 @@ impl CohesiveBody {
                 // Sample local pressure gradient and Bohmian quantum force
                 let (grad_px, grad_py) = state.pressure_gradient_wrapped_at(gx, gy, periodic);
                 let grad_mag_sq = grad_px * grad_px + grad_py * grad_py;
+                let p_abs = state.pressure[state.config.index(gx, gy)].abs();
                 if grad_mag_sq > 0.04 {
                     let (q_fx, q_fy) = state.quantum_force_wrapped_at(gx, gy, periodic);
                     let dfx = -grad_px * 0.18 + q_fx * 0.025;
@@ -580,10 +818,19 @@ impl CohesiveBody {
                     fx_total += dfx;
                     fy_total += dfy;
                     tau_total += rx * dfy - ry * dfx;
+                } else if self.radius <= 3.2 && p_abs > 0.015 {
+                    let (q_fx, q_fy) = state.quantum_force_wrapped_at(gx, gy, periodic);
+                    let dfx = q_fx * 0.045;
+                    let dfy = q_fy * 0.045;
+
+                    let rx = px as f32 - self.x;
+                    let ry = py as f32 - self.y;
+                    fx_total += dfx;
+                    fy_total += dfy;
+                    tau_total += rx * dfy - ry * dfx;
                 }
 
                 // Continuous cohesion erosion when local acoustic pressure exceeds yield threshold
-                let p_abs = state.pressure[state.config.index(gx, gy)].abs();
                 if p_abs > self.material.yield_pressure {
                     let excess = p_abs - self.material.yield_pressure;
                     self.cohesion[l_idx] = (self.cohesion[l_idx] - 0.18 * excess * dt_sub).max(0.0);

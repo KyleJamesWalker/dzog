@@ -19,8 +19,12 @@ https://github.com/user-attachments/assets/63759ad7-6401-47e1-8674-87e3e15a4092
 ## Quick Start
 
 ```bash
-# Run the full verification suite (33 analytical, GPU/CPU agreement, and physics tests)
+# Run the full verification suite (36 analytical, GPU/CPU agreement, and physics tests)
 cargo test --workspace
+
+# Launch the Crystalline Corridor Vertical Wave-Stream Shmup (Chladni Swarms & Annealing Cubes)
+cargo run -p shmup
+cargo run -p shmup -- --autopilot
 
 # Launch the Crystalline Asteroids & Alien Ecology demo (Bevy + WGPU + Live Audio)
 cargo run -p asteroids
@@ -33,6 +37,7 @@ cargo run -p asteroids -- --autopilot --record asteroids_demo.mp4 --duration 30
 cargo run -p pong
 
 # Run headless WGPU zero-readback & FDTD benchmarks
+cargo run -p shmup -- --bench
 cargo run -p asteroids -- --bench
 cargo run -p pong -- --bench
 ```
@@ -65,10 +70,10 @@ Because the medium mediates all causality, complex gameplay mechanics emerge dir
    *Why it matters*: Plasma bolts, phase-pulses, and balls travel and rebound as crisp, self-sustaining wave packets without rigid-body wrappers or artificial velocity clamping.
 3. **Bohm-Hiley Active Information & Pilot-Wave Guidance**:
    The solver continuously evaluates the Bohmian quantum potential $Q$, which measures the *normalized spatial curvature (form)* of the wave envelope rather than raw amplitude.
-   *Why it matters*: Subtle standing-wave channels and interference ridges exert an organizing guidance force ($-\nabla Q$) on actors, allowing alien craft to naturally surf phase valleys and weave around shockwaves without pathfinding graphs.
-4. **Continuous Cohesion Erosion & Topological Cleaving**:
-   Solid structures are regions of high cohesion $C$ with finite yield thresholds. Overpressure erodes cohesion along directional stress axes, opening semi-permeable fracture waveguides before severing the body.
-   *Why it matters*: Destruction is topological rather than a hitpoint counter. Striking an existing glowing crack triggers a resonance cleave that splits the crystal via connected-component BFS into independent spinning shards conserving linear and angular momentum.
+   *Why it matters*: Subtle standing-wave channels and interference ridges exert an organizing guidance force ($-\nabla Q$) on actors, allowing alien craft and Chladni swarm formations (`ChladniCarrierEmitter`) to naturally surf phase valleys and weave around shockwaves without pathfinding graphs or spline scripts.
+4. **Continuous Cohesion Erosion, Topological Cleaving & Exciton Annealing**:
+   Solid structures are regions of high cohesion $C$ with finite yield thresholds. Overpressure erodes cohesion along directional stress axes, opening semi-permeable fracture waveguides before severing the body. Conversely, absorbing piezoelectric micro-condensates ("Power Cubes") triggers reversible **exciton annealing** ($\Delta C > 0$), regrowing severed structural lobes from the core outward.
+   *Why it matters*: Destruction and healing are topological rather than an integer hitpoint counter (`hp: 3`). Striking an existing glowing crack triggers a resonance cleave via connected-component BFS; capturing a field-guided Power Cube physically re-crystallizes lost ship wings.
 5. **Counterfactual Situation Branching**:
    Authoring, debugging, and gameplay share a single experimental loop:
    ```text
@@ -97,6 +102,7 @@ Running continuum PDEs at $60\text{–}120\text{ Hz}$ inside an interactive game
 | [`crates/dzog-core`](./crates/dzog-core) | Reference Yee-staggered FDTD solver, soliton law, Bohmian potential $Q$, exciton luminescence field $L(\mathbf{x}, t)$, `SolitonCarrierPulse` phase-locking, Poisson gravity $\Phi_g$, rotating `CohesiveBody` 3D facet rasterizer & BFS topological cleaving, thruster plumes, antiphase shields, $48\text{ kHz}$ modal audio synthesizer (`FieldModalSynthesizer`), and RON `FieldSpec` / `Checkpoint` serialization. |
 | [`crates/dzog-wgpu`](./crates/dzog-wgpu) | Hardware WGPU compute pipeline (`velocity.wgsl`, `pressure.wgsl`, `luminescence.wgsl`, `impulse.wgsl`, `reduce_body.wgsl`) over ping-pong `RGBA32Float` state & luminescence textures, toroidal periodic wrapping, zero-readback GPU body force/torque/probe reduction (`128` bodies), and verified CPU/GPU agreement ($< 10^{-4}$). |
 | [`crates/dzog-bevy`](./crates/dzog-bevy) | Bevy engine plugin (`DzogBevyPlugin`): nearest-neighbor field canvas presentation (`FieldImageHandle`), shared perceptual view modes (`FieldViewMode`), mandatory hardware WGPU compute accelerator (`GpuFieldAccelerator`), and native `bevy_audio` (`Decodable` / `DzogFieldAudioSource`) streaming. |
+| [`crates/shmup`](./crates/shmup) | **Crystalline Corridor (Bohm-Hiley Chladni Swarm & Annealing Shmup)**: 4-way planar thruster Tri-Lobe crystal ship (3 structural lobes instead of integer HP), Chladni standing-wave alien swarm formations (`ChladniCarrierEmitter`), contested Annealing Piezo Power-Cubes ($\Delta C > 0$ regrowing severed lobes), and scrolling metamaterial canyon walls. |
 | [`asteroids`](./asteroids) | **Field-First Crystalline Asteroids & Alien Ecology** (`240×150` lattice, `1600×1000` window): Multi-tier 3D-faceted mineralogical asteroids (`PiezoQuartz`, `ObsidianAnvil`, `BismuthCrystal`), dynamic field-lit crystal facets ($\nabla L, \nabla p$), continuous soliton laser glow, tactical piezo chain-cleaving, `BohmianSaucer` corvette & `HarmonicWeaver` cruiser craft, autopilot (`[T]` / `--autopilot`), and MP4 session recording (`--record`). |
 | [`pong`](./pong) | **Solid-State & Quantum-Vacuum Breakout**: Crystalline phonon coupling, point-of-impact cleavage planes, sympathetic crystal domino cascades, Paddle Doppler Overcharge, coherent Phase-Pulse wave-casting, and counterfactual checkpoint branching. |
 

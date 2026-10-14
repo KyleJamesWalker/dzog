@@ -83,6 +83,16 @@ pub fn reduce_bodies_cpu(
                         out.fx += dfx;
                         out.fy += dfy;
                         out.tau_z += rx * dfy - ry * dfx;
+                    } else if query.radius <= 3.2 && p(gx, gy).abs() > 0.015 {
+                        // Bohm-Hiley Active Information: low-mass swarm drones & power-cubes
+                        // surf low-amplitude standing-wave curvature (-grad Q).
+                        let q_fx = -(q(xe, gy) - q(xw, gy)) * 0.5 * inv_dx;
+                        let q_fy = -(q(gx, yn) - q(gx, ys)) * 0.5 * inv_dy;
+                        let dfx = q_fx * 0.045;
+                        let dfy = q_fy * 0.045;
+                        out.fx += dfx;
+                        out.fy += dfy;
+                        out.tau_z += rx * dfy - ry * dfx;
                     }
                 }
             }
