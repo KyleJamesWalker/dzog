@@ -4,12 +4,13 @@ members = [
     "crates/dzog-core",
     "crates/dzog-wgpu",
     "crates/dzog-bevy",
+    "crates/shmup",
     "pong",
     "asteroids",
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 rust-version = "1.99"
 edition = "2021"
 license = "MIT"
