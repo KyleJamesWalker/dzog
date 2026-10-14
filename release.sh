@@ -21,14 +21,15 @@ NEW_VERSION="$major.$NEW_MINOR.0"
 
 echo "Bumping version: $CURRENT_VERSION -> $NEW_VERSION"
 
-# 3. Update Cargo.toml
+# 3. Update Cargo.toml and Cargo.lock
 # Use sed to replace the version line within the [workspace.package] section
 # We use a temp file for cross-platform compatibility with sed -i
 sed "/\[workspace\.package\]/,/\[/ s/^version = \"$CURRENT_VERSION\"/version = \"$NEW_VERSION\"/" Cargo.toml > Cargo.toml.tmp
 mv Cargo.toml.tmp Cargo.toml
+cargo check --workspace --quiet
 
 # 4. Commit the change
-git add Cargo.toml
+git add Cargo.toml Cargo.lock
 git commit -m "release: v$NEW_VERSION"
 
 echo "Successfully bumped version to $NEW_VERSION and committed Cargo.toml."
