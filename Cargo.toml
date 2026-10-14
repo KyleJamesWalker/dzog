@@ -35,3 +35,10 @@ debug = false
 [profile.test]
 opt-level = 2
 debug = false
+
+[profile.web]
+inherits = "release"
+opt-level = "s"
+lto = "thin"
+codegen-units = 1
+strip = true

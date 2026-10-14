@@ -1,0 +1,71 @@
+name: Build - Desktop
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Version in the file names (default the short commit)
+        type: string
+        default: ''
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  desktop:
+    name: ${{ matrix.os }}-${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: linux, arch: x86_64, runner: ubuntu-24.04 }
+          - { os: linux, arch: aarch64, runner: ubuntu-24.04-arm }
+          - { os: macos, arch: aarch64, runner: macos-15 }
+          - { os: windows, arch: x86_64, runner: windows-2025 }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - if: matrix.os == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release
+
+      - run: cargo build --release --locked -p asteroids -p pong
+
+      - name: Package
+        id: package
+        env:
+          VERSION: ${{ inputs.version }}
+          SHA: ${{ github.sha }}
+        run: |
+          name="dzog-${VERSION:-${SHA::7}}-${{ matrix.os }}-${{ matrix.arch }}"
+          exe=$([[ ${{ matrix.os }} == windows ]] && echo .exe || true)
+          mkdir -p "dist/$name"
+          cp "target/release/asteroids$exe" "target/release/pong$exe" readme.md LICENSE "dist/$name/"
+          cd dist
+          if [[ ${{ matrix.os }} == windows ]]; then
+            7z a -tzip "$name.zip" "$name" > /dev/null
+            echo "file=dist/$name.zip" >> "$GITHUB_OUTPUT"
+          else
+            tar -czf "$name.tar.gz" "$name"
+            echo "file=dist/$name.tar.gz" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dzog-${{ matrix.os }}-${{ matrix.arch }}
+          path: ${{ steps.package.outputs.file }}
+          compression-level: 0
+          if-no-files-found: error

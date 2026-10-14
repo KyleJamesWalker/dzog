@@ -1,0 +1,52 @@
+name: Build - Web
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Version in the file names (default the short commit)
+        type: string
+        default: ''
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  web:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: web
+
+      # The CLI must match the wasm-bindgen crate version in Cargo.lock.
+      - id: bindgen
+        run: |
+          echo "version=$(cargo metadata --format-version 1 --locked \
+            | jq -r '.packages[] | select(.name == "wasm-bindgen") | .version')" >> "$GITHUB_OUTPUT"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@${{ steps.bindgen.outputs.version }}
+
+      - id: package
+        env:
+          VERSION: ${{ inputs.version }}
+          SHA: ${{ github.sha }}
+        run: |
+          name="dzog-${VERSION:-${SHA::7}}-web"
+          tools/build_web.sh "dist/$name"
+          (cd dist && zip -qr "$name.zip" "$name")
+          echo "file=dist/$name.zip" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dzog-web
+          path: ${{ steps.package.outputs.file }}
+          compression-level: 0
+          if-no-files-found: error

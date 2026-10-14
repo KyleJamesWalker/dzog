@@ -14,10 +14,14 @@ use bevy::{
     render::render_resource::{Extent3d, TextureDimension, TextureFormat},
 };
 use dzog_core::{
-    AcousticState, BoundaryMask, FieldAcousticFrame, FieldModalSynthesizer, MaterialField,
-    SolverConfig,
+    AcousticSolver, AcousticState, BoundaryMask, FieldAcousticFrame, FieldModalSynthesizer,
+    MaterialField, OuterBoundaryRule, SolverConfig,
 };
+use dzog_wgpu::{GpuBodyQuery, GpuBodyReduction};
+#[cfg(not(target_arch = "wasm32"))]
 use dzog_wgpu::{GpuContext, GpuSimulation};
+#[cfg(target_arch = "wasm32")]
+use dzog_wgpu::reduce_bodies_cpu;
 
 /// Bevy plugin registering Dzog's procedural field-audio asset (`DzogFieldAudioSource`).
 pub struct DzogBevyPlugin;
@@ -28,12 +32,16 @@ impl Plugin for DzogBevyPlugin {
     }
 }
 
-/// Hardware WGPU compute accelerator wrapping `GpuContext` and `GpuSimulation`.
+/// Field compute backend: the WGPU pipeline natively, the `dzog-core` reference solver on wasm32,
+/// where the per-frame blocking GPU readback is unavailable.
 pub struct GpuFieldAccelerator {
+    #[cfg(not(target_arch = "wasm32"))]
     pub ctx: GpuContext,
+    #[cfg(not(target_arch = "wasm32"))]
     pub sim: GpuSimulation,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl GpuFieldAccelerator {
     pub fn new(
         state: &AcousticState,
@@ -45,6 +53,80 @@ impl GpuFieldAccelerator {
         let sim = GpuSimulation::new(&ctx, state, material, boundary, config)
             .expect("Failed to initialize WGPU simulation pipeline");
         Self { ctx, sim }
+    }
+
+    pub fn set_outer_rule(&mut self, outer_rule: OuterBoundaryRule) {
+        self.sim.set_outer_rule(&self.ctx, outer_rule);
+    }
+
+    /// Advance `substeps` FDTD substeps of `solver`, including its step clock.
+    pub fn step(&self, solver: &mut AcousticSolver, substeps: usize) {
+        self.sim.upload_state(&self.ctx, &solver.state);
+        self.sim.upload_material(&self.ctx, &solver.material);
+        self.sim.upload_boundary(&self.ctx, &solver.boundary);
+        self.sim.step(&self.ctx, substeps);
+        self.sim.readback_state_into(&self.ctx, &mut solver.state);
+        advance_clock(solver, substeps);
+    }
+
+    /// Advance like [`Self::step`], then reduce body forces and probes for `queries`.
+    pub fn step_and_reduce(
+        &self,
+        solver: &mut AcousticSolver,
+        substeps: usize,
+        queries: &[GpuBodyQuery],
+    ) -> Vec<GpuBodyReduction> {
+        let reductions = self.sim.step_and_reduce_into(
+            &self.ctx,
+            substeps,
+            &mut solver.state,
+            &solver.material,
+            &solver.boundary,
+            queries,
+        );
+        advance_clock(solver, substeps);
+        reductions
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn advance_clock(solver: &mut AcousticSolver, substeps: usize) {
+    solver.current_step += substeps;
+    solver.current_time += solver.config.dt * substeps as f32;
+}
+
+#[cfg(target_arch = "wasm32")]
+impl GpuFieldAccelerator {
+    pub fn new(
+        _state: &AcousticState,
+        _material: &MaterialField,
+        _boundary: &BoundaryMask,
+        _config: &SolverConfig,
+    ) -> Self {
+        Self {}
+    }
+
+    pub fn set_outer_rule(&mut self, _outer_rule: OuterBoundaryRule) {}
+
+    /// Advance `substeps` FDTD substeps of `solver`, including its step clock.
+    pub fn step(&self, solver: &mut AcousticSolver, substeps: usize) {
+        for _ in 0..substeps {
+            solver.step();
+        }
+    }
+
+    /// Advance like [`Self::step`], then reduce body forces and probes for `queries`.
+    pub fn step_and_reduce(
+        &self,
+        solver: &mut AcousticSolver,
+        substeps: usize,
+        queries: &[GpuBodyQuery],
+    ) -> Vec<GpuBodyReduction> {
+        self.step(solver, substeps.saturating_sub(1));
+        let q_pressure = solver.state.pressure.clone();
+        self.step(solver, substeps.min(1));
+        let periodic = solver.boundary.outer_rule == OuterBoundaryRule::Periodic;
+        reduce_bodies_cpu(&solver.state, &q_pressure, periodic, queries)
     }
 }
 

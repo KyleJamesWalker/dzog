@@ -133,9 +133,11 @@ fn test_periodic_wrap_agreement_and_zero_readback_body_reduction() {
         .expect("Failed to create GPU simulation");
 
     let substeps = 12;
-    for _ in 0..substeps {
+    for _ in 0..substeps - 1 {
         cpu_solver.step();
     }
+    let q_pressure = cpu_solver.state.pressure.clone();
+    cpu_solver.step();
     gpu_sim.step(&ctx, substeps);
 
     let gpu_state = gpu_sim.readback_state(&ctx);
@@ -180,4 +182,18 @@ fn test_periodic_wrap_agreement_and_zero_readback_body_reduction() {
         (reductions[1].max_pressure - expected_probe_p).abs() < 1e-4,
         "Point probe reduction must match cell pressure without full-texture readback"
     );
+
+    let cpu_reductions = reduce_bodies_cpu(&gpu_state, &q_pressure, true, &queries);
+    for (cpu, gpu) in cpu_reductions.iter().zip(reductions.iter()) {
+        let diffs = [
+            cpu.fx - gpu.fx,
+            cpu.fy - gpu.fy,
+            cpu.tau_z - gpu.tau_z,
+            cpu.max_pressure - gpu.max_pressure,
+        ];
+        assert!(
+            diffs.iter().all(|d| d.abs() < 1e-4),
+            "CPU body reduction must match the GPU reduction within 1e-4 (cpu {cpu:?}, gpu {gpu:?})"
+        );
+    }
 }

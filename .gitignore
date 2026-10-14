@@ -22,3 +22,6 @@ Thumbs.db
 *.mp4
 *.tmp
 *.bak
+
+# Web build output
+/dist/
