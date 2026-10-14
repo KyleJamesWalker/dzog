@@ -1,0 +1,94 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      publish: ${{ steps.version.outputs.publish }}
+    steps:
+      - id: version
+        run: |
+          if [[ $GITHUB_EVENT_NAME == push && $GITHUB_REF == refs/tags/v* ]]; then
+            echo "version=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  desktop:
+    needs: version
+    uses: ./.github/workflows/build_desktop.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+  web:
+    needs: version
+    uses: ./.github/workflows/build_web.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+
+  assemble:
+    needs: [version, desktop, web]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: dzog-*
+          merge-multiple: true
+          path: dist
+
+      - name: Checksums
+        working-directory: dist
+        run: |
+          sha256sum -- * > SHA256SUMS
+          {
+            echo '### Release assets (${{ needs.version.outputs.version }}, publish: ${{ needs.version.outputs.publish }})'
+            echo '| File | Size | SHA-256 |'
+            echo '| --- | ---: | --- |'
+            while read -r sum file; do
+              echo "| $file | $(du -h "$file" | cut -f 1) | \`$sum\` |"
+            done < SHA256SUMS
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat SHA256SUMS
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-assets
+          path: dist
+          compression-level: 0
+          retention-days: 7
+
+  publish:
+    needs: [version, assemble]
+    if: needs.version.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-assets
+          path: dist
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.version.outputs.version }}
+        run: |
+          gh release view "$TAG" > /dev/null 2>&1 \
+            || gh release create "$TAG" --verify-tag --generate-notes --title "$TAG"
+          gh release upload "$TAG" dist/* --clobber
