@@ -30,3 +30,8 @@ bevy = { version = "0.20", default-features = false, features = [
 
 [profile.dev]
 opt-level = 2
+debug = false
+
+[profile.test]
+opt-level = 2
+debug = false
