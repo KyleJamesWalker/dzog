@@ -7,7 +7,7 @@
 
 Conventional game engines treat space as an empty coordinate system populated by isolated rigid bodies (`struct Asteroid { hp: 2 }`) that ignore one another until a bounding-box check triggers an imperative callback. **Dzog** replaces object-centric execution with a continuous physical medium governed by wave mechanics, solid-state crystal cohesion, and pilot-wave guidance.
 
-In Dzog, a scene is an **executable physical situation**: a lattice where every cell carries pressure, velocity, material impedance, and structural cohesion. Ships, destructible asteroids, projectiles, and shields are not sealed state machines sitting in dead space—they are persistent patterns of matter and wave excitation that radiate wakes, fracture along continuous stress planes, and interfere across space without collision hierarchies.
+In Dzog, a scene is an **executable physical situation**: a lattice where every cell carries pressure, velocity, material impedance, and structural cohesion. Ships, destructible asteroids, projectiles, and shields are persistent patterns of matter and wave excitation that radiate wakes, fracture along continuous stress planes, and interfere directly across the medium.
 
 ![Field-First Crystalline Asteroids & Alien Ecology Demo](./docs/asteroids_demo.png)
 
