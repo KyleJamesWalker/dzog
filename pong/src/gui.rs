@@ -29,6 +29,7 @@ pub fn launch_gui() {
             primary_window: Some(Window {
                 title: "Dzog — Solid-State & Quantum-Vacuum Breakout".into(),
                 resolution: (1024_u32, 640_u32).into(),
+                canvas: Some("#dzog".into()),
                 ..default()
             }),
             ..default()

@@ -276,6 +276,7 @@ pub fn launch_gui() {
             primary_window: Some(Window {
                 title: "Dzog — Field-First Crystalline Asteroids & Alien Ecology".into(),
                 resolution: (1600_u32, 1000_u32).into(),
+                canvas: Some("#dzog".into()),
                 ..default()
             }),
             ..default()

@@ -1034,14 +1034,7 @@ impl BreakoutFieldGame {
 
         // Advance Dzog FDTD field simulation on the WGPU compute pipeline
         let f_substeps = self.solver.config.substeps_per_macro;
-        let gpu = &self.gpu_accel;
-        gpu.sim.upload_state(&gpu.ctx, &self.solver.state);
-        gpu.sim.upload_material(&gpu.ctx, &self.solver.material);
-        gpu.sim.upload_boundary(&gpu.ctx, &self.solver.boundary);
-        gpu.sim.step(&gpu.ctx, f_substeps);
-        gpu.sim.readback_state_into(&gpu.ctx, &mut self.solver.state);
-        self.solver.current_step += f_substeps;
-        self.solver.current_time += self.solver.config.dt * f_substeps as f32;
+        self.gpu_accel.step(&mut self.solver, f_substeps);
 
         // 8. Sympathetic Crystal Cleaving (Wave-Induced Domino Shatter)
         if self.wave_force_enabled && self.in_play {

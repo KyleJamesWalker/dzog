@@ -295,9 +295,7 @@ impl AsteroidsFieldGame {
             }
         }
 
-        self.gpu_accel
-            .sim
-            .set_outer_rule(&self.gpu_accel.ctx, self.solver.boundary.outer_rule);
+        self.gpu_accel.set_outer_rule(self.solver.boundary.outer_rule);
     }
 
     /// Spawn a new wave of mineralogical asteroids and alien antagonists.
@@ -1408,19 +1406,9 @@ impl AsteroidsFieldGame {
             Vec::new()
         };
 
-        let reductions = {
-            let gpu = &self.gpu_accel;
-            gpu.sim.step_and_reduce_into(
-                &gpu.ctx,
-                f_substeps,
-                &mut self.solver.state,
-                &self.solver.material,
-                &self.solver.boundary,
-                &queries,
-            )
-        };
-        self.solver.current_step += f_substeps;
-        self.solver.current_time += self.solver.config.dt * f_substeps as f32;
+        let reductions = self
+            .gpu_accel
+            .step_and_reduce(&mut self.solver, f_substeps, &queries);
 
         if self.wave_force_enabled {
             for (rock, red) in self.asteroids.iter_mut().zip(reductions.iter()) {
