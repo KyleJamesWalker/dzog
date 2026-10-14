@@ -136,34 +136,13 @@ Dzog uses a **Yee-staggered finite-difference time-domain (FDTD)** lattice:
   $$c_{\text{max}} = \sqrt{\frac{\max K}{\min \rho}}, \qquad \Delta t \le \frac{\text{safety}}{c_{\text{max}} \sqrt{\Delta x^{-2} + \Delta y^{-2}}}$$
 - **Exponential Damping**: Energy dissipation integrates via $\exp(-\gamma \Delta t)$ rather than Euler subtraction $(1 - \gamma \Delta t)$, keeping damping factors strictly positive inside high-absorption boundary sponges.
 
-#### GPU Texture Layout & Compute Passes (`dzog-wgpu`)
-To maximize GPU memory bandwidth, field states are packed into cache-coherent `RGBA32Float` textures:
-
-| GPU Texture | `.r` Channel | `.g` Channel | `.b` Channel | `.a` Channel |
-| :--- | :--- | :--- | :--- | :--- |
-| **`State` (Ping-Pong)** | Pressure $p$ | East Velocity $v_x$ | North Velocity $v_y$ | Bohmian Potential $Q$ |
-| **`Material`** | Density $\rho$ | Bulk Modulus $K$ | Damping $\gamma$ | Cohesion $C$ |
-| **`Boundary`** | East Wall Mask | East Wall $v_x$ | North Wall Mask | North Wall $v_y$ |
-| **`Luminescence`** | Exciton Glow $L$ | *Unused* | *Unused* | *Unused* |
-
-```text
-[ CPU: Body Kinematics & Impulses ]
-                 |
-                 v  (Compact Uniform Upload)
-+-----------------------------------------------------------------------+
-| WGPU Compute Pipeline (dzog-wgpu)                                     |
-|  1. impulse.wgsl      -> Stamp moving hulls, plumes & carrier pulses  |
-|  2. velocity.wgsl     -> Update staggered vx, vy & Bohmian Q          |
-|  3. pressure.wgsl     -> Update p, soliton f_nl(p) & cohesion C       |
-|  4. luminescence.wgsl -> Evolve reaction-diffusion exciton glow L     |
-|  5. reduce_body.wgsl  -> Parallel reduction of -∇p, -∇Q & audio probes|
-+-----------------------------------------------------------------------+
-                 |                                      |
-                 v (Zero-Readback Texture)              v (Compact Struct Readback)
-[ Bevy Perceptual Shaders (dzog-bevy) ]     [ Next Frame Body Update & 48 kHz Audio ]
-```
-
-Instead of copying megabytes of field textures back to the CPU, `reduce_body.wgsl` performs a parallel reduction on the GPU over each body's bounding contour, returning a compact buffer of net forces, torques, and acoustic probe samples (up to 128 bodies).
+#### Zero-Readback GPU Parallel Reduction (`dzog-wgpu`)
+To maximize GPU memory bandwidth, field states are packed into cache-coherent `RGBA32Float` ping-pong textures (`State`, `Material`, `Boundary`, and `Luminescence`; see the [`readme.md` Workspace Architecture](../readme.md#workspace-architecture) for channel layouts). Each macro-frame executes five WGSL compute stages:
+1. **`impulse.wgsl`**: Stamps moving hulls, thruster plumes, and phase-locked carrier pulses into the grid.
+2. **`velocity.wgsl`**: Updates staggered face velocities $v_x, v_y$ and evaluates the Bohmian potential $Q$.
+3. **`pressure.wgsl`**: Updates cell-center pressure $p$, applies the rational soliton law $f_{\text{nl}}(p)$, and erodes cohesion $C$.
+4. **`luminescence.wgsl`**: Evolves the reaction-diffusion exciton glow field $L$.
+5. **`reduce_body.wgsl`**: Performs a parallel reduction on the GPU over each body's bounding contour, returning a compact buffer of net forces ($-\nabla p, -\nabla Q$), torques, and acoustic probe samples (up to 128 bodies) without copying field textures back to the CPU.
 
 ---
 
@@ -193,31 +172,3 @@ Because the lattice already computes physical pressure oscillations, exciton glo
    $$f_0 = 440 \, c(\mathbf{x}) = 440 \sqrt{\frac{K(\mathbf{x})}{\rho(\mathbf{x})}}$$
    High-stiffness `PiezoQuartz` rings with bright crystalline harmonics, while dense `ObsidianAnvil` produces low metallic clangs. Sub-threshold vacuum ripples ($|p| < 0.15$) are gated to exact `(0.0, 0.0)` silence.
 
----
-
-## 7. Crate Architecture & Verification Suite
-
-The workspace separates pure field physics (`dzog-core`), GPU compute shaders (`dzog-wgpu`), host integration (`dzog-bevy`), and executable simulations:
-
-| Crate | Architectural Role |
-| :--- | :--- |
-| [`crates/dzog-core`](../crates/dzog-core) | Host-agnostic Rust reference solver: Yee FDTD stencils, soliton law, Bohmian $Q$, Poisson gravity $\Phi_g$, 3D-faceted `CohesiveBody` rasterizer & BFS cleaving, $48\text{ kHz}$ modal DSP, and deterministic RON `Checkpoint` branching. |
-| [`crates/dzog-wgpu`](../crates/dzog-wgpu) | Hardware WGPU compute pipeline (`velocity.wgsl`, `pressure.wgsl`, `luminescence.wgsl`, `impulse.wgsl`, `reduce_body.wgsl`) with verified CPU/GPU numerical agreement ($< 10^{-4}$). |
-| [`crates/dzog-bevy`](../crates/dzog-bevy) | Bevy engine plugin (`DzogBevyPlugin`) managing windowing, input, `FieldViewMode` canvas presentation, `GpuFieldAccelerator`, and native `bevy_audio` sink playback. |
-| [`pong`](../pong) | **Solid-State & Quantum-Vacuum Breakout**: Demonstrates pure solitary wave balls (zero rigid-body structs), moving boundary Doppler paddles, and sympathetic crystal cleavage cascades. |
-| [`asteroids`](../asteroids) | **Crystalline Asteroids & Alien Ecology**: Toroidal & gravity-well wave mechanics, multi-mineral 3D-faceted asteroids, antiphase shield energy harvesting, and pilot-wave alien craft. |
-| [`crates/shmup`](../crates/shmup) | **Crystalline Corridor**: Vertical metamaterial canyon shooter featuring a topological **Tri-Lobe Crystalline Ship**, spline-free **Chladni Pilot-Wave Swarms**, and contested **Annealing Power Cubes** ($\Delta C > 0$). |
-
-### Verification Commands
-
-All physical invariants (soliton self-cohesion, Fresnel reflection ratios, energy conservation, topological BFS cleaving, reversible annealing, and GPU/CPU equivalence) are verified via automated tests:
-
-```bash
-# Run all 36 analytical, topological, and GPU/CPU numerical equivalence tests
-cargo test --workspace
-
-# Run headless WGPU zero-readback throughput benchmarks
-cargo run -p asteroids -- --bench
-cargo run -p shmup -- --bench
-cargo run -p pong -- --bench
-```
