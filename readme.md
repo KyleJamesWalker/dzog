@@ -9,7 +9,8 @@ Conventional game engines treat space as an empty coordinate system populated by
 
 In Dzog Simulator, a scene is an **executable physical situation**: a lattice where every cell carries pressure, velocity, material impedance, and structural cohesion. Ships, destructible asteroids, projectiles, and shields are persistent patterns of matter and wave excitation that radiate wakes, fracture along continuous stress planes, and interfere directly across the medium.
 
-https://github.com/user-attachments/assets/210232b6-71d4-4e40-b935-3e4304eadb6e
+https://github.com/user-attachments/assets/63759ad7-6401-47e1-8674-87e3e15a4092
+
 
 ---
 
