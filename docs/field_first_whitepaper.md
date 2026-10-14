@@ -1,6 +1,6 @@
 # Field-First Computing: A Wave-Matter & Pilot-Wave Runtime Architecture
 
-**Abstract** — Conventional simulation and game engines model virtual worlds as collections of isolated data structures sitting in empty coordinate space. Objects remain inert until an explicit collision check or event bus schedules an imperative callback, requiring brittle $O(N^2)$ state scripts to coordinate cross-entity behavior. **Dzog** proposes an alternative paradigm: *relation-first computing* over a continuous physical field. Drawing on David Bohm and Basil Hiley's process-first formulation of quantum mechanics (*active information*) and James Hillman's concept of the *situated image*, Dzog treats the spatial medium itself as the primary computational substrate. Every actor—whether a projectile, a destructible crystal asteroid, a shield, or an autonomous swarm—is a persistent pattern of wave excitation and material commitment within a shared Hamiltonian lattice. Because the medium mediates all causality, collision response, structural fracture, AI navigation, and real-time audio synthesis emerge directly from local physical laws rather than special-case scripts.
+**Abstract** — Conventional simulation and game engines model virtual worlds as collections of isolated data structures sitting in empty coordinate space. Objects remain inert until an explicit collision check or event bus schedules an imperative callback, requiring brittle $O(N^2)$ state scripts to coordinate cross-entity behavior. **Dzog** proposes an alternative paradigm: *relation-first computing* over a continuous physical field. Drawing on David Bohm and Basil Hiley's process-first formulation of quantum mechanics (*active information*) and James Hillman's concept of the *situated image*, Dzog treats the spatial medium itself as the primary computational substrate. Every actor—whether a projectile, a destructible crystal asteroid, a shield, or an autonomous swarm—is a persistent pattern of wave excitation and material commitment within a shared Hamiltonian lattice. Because the medium mediates all causality, collision response, structural fracture, AI navigation, dynamic lighting, and real-time audio synthesis emerge directly from local physical laws rather than special-case scripts.
 
 ---
 
@@ -89,7 +89,7 @@ Instead of writing custom material scripts (`if target.type == Metal { reflect_b
 - **True Structural Fracture**: Lasers and shockwaves erode cohesion $C$ at the exact cells they strike, carving glowing internal cracks that guide subsequent waves until the object physically splits in two.
 - **Topological Ships & Healing**: In the `shmup` demo, the player's ship has three physical crystal lobes (Port Wing, Core, Starboard Wing) instead of HP. Taking a heavy hit on the left wing severs that wing physically; catching a piezoelectric "Power Cube" triggers **annealing** ($\Delta C > 0$), regrowing the lost crystal wing cell-by-cell.
 
-### 4.3 Technical Details: Impedance & Connected-Component Cleaving
+### 4.3 Technical Details: Impedance, Erosion & Connected-Component Cleaving
 
 ```text
    [ Constitutive Material Grid: ρ(x), K(x), γ(x), C(x) ]
@@ -105,17 +105,21 @@ Instead of writing custom material scripts (`if target.type == Metal { reflect_b
    Each material defines a local wave speed $c(\mathbf{x}) = \sqrt{K(\mathbf{x})/\rho(\mathbf{x})}$ and characteristic impedance $Z(\mathbf{x}) = \sqrt{\rho(\mathbf{x}) K(\mathbf{x})}$. When a wave crosses from medium $Z_1$ into $Z_2$, reflection ($R$) and transmission ($T$) follow exact Fresnel mechanics without branching logic:
    $$R = \frac{Z_2 - Z_1}{Z_2 + Z_1}, \qquad T = \frac{2 Z_2}{Z_2 + Z_1}$$
    Dense `ObsidianAnvil` ($Z = 2.02$) naturally bounces glancing laser bolts, while `PiezoQuartz` ($c = 1.48$) channels fast internal stress waves.
-2. **Moving Boundaries & Antiphase Energy Harvesting**:
-   Moving hulls stamp their instantaneous velocity ($v_n = v_{\text{actor}}$) into cell-face masks, compressing waves ahead of them (Doppler shift). Firing an **Antiphase Shield** injects a $\Delta \phi = \pi$ inverted wavefront that destructively cancels incoming enemy fire and harvests the annihilated Hamiltonian wave energy into the ship's weapon capacitor.
-3. **BFS Topological Cleaving & Annealing**:
-   When local overpressure $|p|$ exceeds a body's yield threshold, $C(\mathbf{x})$ erodes along crystallographic stress axes. Once a fracture line reaches $C = 0$ across a body, a Breadth-First Search (BFS) connected-component pass detects the topological split and spawns independent tumbling child bodies conserving linear and angular momentum. Conversely, `CohesiveBody::anneal_cells` restores $C \to 1$ outward from surviving core cells.
+2. **Continuous Cohesion Erosion, BFS Cleaving & Annealing**:
+   When local pressure $|p|$ exceeds a material's yield threshold $p_{\text{yield}}$, cohesion erodes proportionally to the overpressure:
+   $$C^{n+1} = \max\!\left(0, \; C^n - \eta_{\text{erode}}\left(|p| - p_{\text{yield}}\right)\Delta t\right)$$
+   Partially eroded cells ($0.15 \le C < 0.55$) act as internal waveguides that trap and channel subsequent shockwaves along the crack. Once a fracture line reaches $C = 0$ across a body, a Breadth-First Search (BFS) connected-component pass detects the topological split and spawns independent tumbling child fragments conserving momentum. Conversely, capturing an annealing condensate (`CohesiveBody::anneal_cells`) drives $\Delta C > 0$ outward from surviving core cells, sealing cracks and regrowing severed lobes.
+3. **Moving Boundaries & Antiphase Energy Harvesting**:
+   Moving hulls stamp their instantaneous velocity ($v_n = v_{\text{actor}}$) into cell-face masks, compressing waves ahead of them (Doppler shift). The lattice continuously tracks total **Hamiltonian mechanical energy** ($H = E_p + E_k$) across potential and kinetic components:
+   $$E_p = \sum \frac{p^2}{2K} \Delta A, \qquad E_k = \sum \frac{1}{2}\rho |\mathbf{v}|^2 \Delta A$$
+   When the player fires an **Antiphase Shield**, it injects an inverted wavefront ($\Delta \phi = \pi$) that destructively cancels incoming enemy fire; the engine measures the exact drop in local Hamiltonian energy $\Delta H$ and harvests that cancelled wave energy directly into the ship's weapon capacitor.
 
 ---
 
 ## 5. Real-Time Numerical Engineering & GPU Pipeline
 
 ### 5.1 Plain Explanation
-Simulating partial differential equations (PDEs) across tens of thousands of cells at 60–120 frames per second is computationally demanding. Furthermore, naive grid math suffers from visual "checkerboard" artifacts, numerical explosions, and slow data transfers between the graphics card (GPU) and main processor (CPU).
+Simulating partial differential equations (PDEs) across tens of thousands of cells at 60–120 frames per second is computationally demanding. Furthermore, naive grid math suffers from visual "checkerboard" artifacts, numerical explosions when time steps are too large, and slow data transfers between the graphics card (GPU) and main processor (CPU).
 
 ### 5.2 Why It Matters to the Engine
 For a field engine to be viable for fast-paced games, it must satisfy three engineering constraints:
@@ -123,13 +127,14 @@ For a field engine to be viable for fast-paced games, it must satisfy three engi
 2. **Zero-Readback GPU Speed**: The CPU cannot afford to download the entire field texture from the GPU every frame just to figure out how much force is pushing on a ship.
 3. **Deterministic Snapshots**: Players and developers should be able to save the exact state of the world at any frame, test a "what-if" action, and rewind instantly.
 
-### 5.3 Technical Details: Yee Staggering & Zero-Readback WGPU Compute
+### 5.3 Technical Details: Yee Staggering, CFL Stability & Zero-Readback WGPU
 
-#### Staggered Grid Discretization
-Dzog uses a **Yee-staggered finite-difference time-domain (FDTD)** lattice (full derivations in [`docs/field_math.md`](./field_math.md)):
-- **Cell Centers $(i+\frac{1}{2}, j+\frac{1}{2})$ at integer times $t^n$**: Pressure $p$, Bohmian potential $Q$, luminescence $L$, and material properties $(\rho, K, \gamma, C)$.
-- **East/North Cell Faces at half-integer times $t^{n+1/2}$**: Velocities $v_x, v_y$ and moving wall masks.
-- **Exponential Damping**: Energy dissipation integrates via $\exp(-\gamma \Delta t)$ rather than Euler subtraction $(1 - \gamma \Delta t)$, ensuring damping factors remain strictly positive under any time step $\Delta t$ bounded by the global Courant–Friedrichs–Lewy (CFL) limit.
+#### Staggered Grid Discretization & Stability Bounds
+Dzog uses a **Yee-staggered finite-difference time-domain (FDTD)** lattice:
+- **Staggered Placement**: Pressure $p$, Bohmian $Q$, luminescence $L$, and material properties $(\rho, K, \gamma, C)$ live at **cell centers** $(i+\frac{1}{2}, j+\frac{1}{2})$ at integer steps $t^n$. Velocities $v_x, v_y$ and moving wall masks live on **East/North cell faces** at half-steps $t^{n+1/2}$. Storing pressure and velocity half a cell apart prevents odd-even decoupling ("checkerboarding") and guarantees exact momentum conservation across solid walls.
+- **Global CFL Time-Step Bound**: Information on a discrete grid cannot travel faster than one cell per step. Before stepping, `SolverConfig::compute_cfl_dt` locks $\Delta t$ against the fastest wave speed across all materials on the grid:
+  $$c_{\text{max}} = \sqrt{\frac{\max K}{\min \rho}}, \qquad \Delta t \le \frac{\text{safety}}{c_{\text{max}} \sqrt{\Delta x^{-2} + \Delta y^{-2}}}$$
+- **Exponential Damping**: Energy dissipation integrates via $\exp(-\gamma \Delta t)$ rather than Euler subtraction $(1 - \gamma \Delta t)$, ensuring damping factors remain strictly positive even inside ultra-high-absorption boundary sponges.
 
 #### GPU Texture Layout & Compute Passes (`dzog-wgpu`)
 To maximize GPU memory bandwidth, field states are packed into cache-coherent `RGBA32Float` textures:
@@ -149,8 +154,8 @@ To maximize GPU memory bandwidth, field states are packed into cache-coherent `R
 | WGPU Compute Pipeline (dzog-wgpu)                                     |
 |  1. impulse.wgsl      -> Stamp moving hulls, plumes & carrier pulses  |
 |  2. velocity.wgsl     -> Update staggered vx, vy & Bohmian Q          |
-|  3. pressure.wgsl     -> Update p + rational soliton law f_nl(p)      |
-|  4. luminescence.wgsl -> Evolve persistent exciton trail glow L       |
+|  3. pressure.wgsl     -> Update p, soliton f_nl(p) & cohesion C       |
+|  4. luminescence.wgsl -> Evolve reaction-diffusion exciton glow L     |
 |  5. reduce_body.wgsl  -> Parallel reduction of -∇p, -∇Q & audio probes|
 +-----------------------------------------------------------------------+
                  |                                      |
@@ -165,20 +170,25 @@ Instead of copying megabytes of field textures back to the CPU, `reduce_body.wgs
 ## 6. Perceptual Projections: Seeing and Hearing the Same Field
 
 ### 6.1 Plain Explanation
-In most games, graphics and sound are separate illusions: hitting an asteroid plays a pre-recorded `explosion.wav` file while spawning a particle sprite. In Dzog, following James Hillman's concept of the *situated image*, visuals and audio are simply two different ways of perceiving the exact same underlying field math.
+In most games, graphics, lighting, and sound are separate illusions: hitting an asteroid plays a pre-recorded `explosion.wav` file while spawning a particle sprite and a fake point-light. In Dzog, following James Hillman's concept of the *situated image*, visuals, dynamic crystal lighting, and audio are simply different ways of perceiving the exact same underlying field math.
 
 ### 6.2 Why It Matters to the Engine
-Because the lattice already computes real physical pressure oscillations and material wave speeds:
+Because the lattice already computes real physical pressure oscillations, exciton glow diffusion, and material wave speeds:
+- **Field-Driven 3D Crystal Lighting**: Passing laser bolts and stressed crystal cracks emit a persistent luminescence field ($L$) that diffuses through space and dynamically lights the 3D facets of nearby asteroids.
 - **Multiple Trustworthy Visual Lenses**: Developers and players can toggle between the artistic game view and scientific diagnostic views (inspecting invisible pilot-wave channels $Q$ or material stress $C$) at any time without altering gameplay.
 - **Zero `.wav` Files Required**: Virtual microphones attached to the player's ship sample the pressure waves hitting the hull and drive a physical synthesizer tuned to the exact mineral stiffness of whatever object was just struck.
 
-### 6.3 Technical Details: Multi-View Rendering & $48\text{ kHz}$ Modal Sonification
-1. **Perceptual View Projections (`FieldViewMode`)**:
-   - *Composite Experience View*: Renders 3D-faceted crystalline bodies dynamically lit by local pressure gradients ($\nabla p$) and exciton luminescence ($\nabla L$).
+### 6.3 Technical Details: Exciton Luminescence, Multi-View Rendering & Modal Audio
+1. **Reaction-Diffusion Exciton Luminescence ($L$)**:
+   Pass 3 (`luminescence.wgsl`) evolves a radiative light field $L(\mathbf{x}, t) \in [0, 4]$ driven by wave energy $S_{\text{wave}}(p, \mathbf{v})$ and piezoelectric crystal stress $S_{\text{piezo}}(p, C)$, diffusing at a rate $D \propto c(\mathbf{x})$:
+   $$L^{n+1} = e^{-\gamma_L \Delta t}\left(L^n + D \Delta t \, \nabla^2 L^n\right) + \Delta t \left(S_{\text{wave}} + S_{\text{piezo}}\right)$$
+   Spatial gradients $\nabla L$ and $\nabla p$ compute per-pixel 3D facet normals on rotating mineral hulls (`CohesiveBody::sample_crystal_facet`), so glowing cracks and passing solitons cast directional specular light onto nearby bodies.
+2. **Perceptual View Projections (`FieldViewMode`)**:
+   - *Composite Experience View*: Renders 3D-faceted crystalline bodies lit by $\nabla L$ and $\nabla p$.
    - *Bohmian & Pressure View ($p, Q$)*: Exposes the pilot-wave guidance valleys steering AI trajectories.
    - *Velocity & Poynting Flux View ($\mathbf{v}, \mathbf{I} = p\mathbf{v}$)*: Visualizes instantaneous energy transport vectors.
    - *Impedance & Cohesion View ($Z, C$)*: Displays material commitments and internal fracture waveguides.
-2. **Material-Tuned Modal Audio (`FieldModalSynthesizer`)**:
+3. **Material-Tuned Modal Audio (`FieldModalSynthesizer`)**:
    Detailed in [`docs/overview_audio.md`](./overview_audio.md), `BinauralCockpitSonifier` samples port and starboard wingtip pressures and Doppler closing speeds at $60\text{ Hz}$, feeding a lock-free $48\text{ kHz}$ Bevy `Decodable` stream (`DzogFieldAudioSource`). Strike frequencies derive directly from the struck material's acoustic wave speed:
    $$f_0 = 440 \, c(\mathbf{x}) = 440 \sqrt{\frac{K(\mathbf{x})}{\rho(\mathbf{x})}}$$
    High-stiffness `PiezoQuartz` rings with bright crystalline harmonics, while dense `ObsidianAnvil` produces low metallic clangs. Sub-threshold vacuum ripples ($|p| < 0.15$) are gated to exact `(0.0, 0.0)` silence.

@@ -94,7 +94,7 @@ Because the medium mediates all causality, complex gameplay mechanics emerge dir
 
 ## Numerical Design: Built for Real-Time GPU Execution
 
-Running continuum PDEs at $60\text{–}120\text{ Hz}$ inside an interactive game requires strict numerical discipline so the simulation never explodes into `NaN`s, leaks energy, or stalls the CPU. Full equations, stencils, and proofs are detailed in [**`docs/field_math.md`**](./docs/field_math.md):
+Running continuum PDEs at $60\text{–}120\text{ Hz}$ inside an interactive game requires strict numerical discipline so the simulation never explodes into `NaN`s, leaks energy, or stalls the CPU. Full equations, stencils, and GPU architecture are detailed in [**`docs/field_first_whitepaper.md`**](./docs/field_first_whitepaper.md):
 
 - **Yee-Staggered Conservation**: Pressure lives at cell centers and velocity lives on East/North cell faces at half-time steps. This eliminates odd-even checkerboard artifacts and guarantees exact momentum conservation when waves slam into rotating hulls.
 - **Exact Fresnel Material Interfaces**: Face densities use adjacent-cell means so high-impedance materials (like `ObsidianAnvil`) naturally reflect glancing shots while piezo crystals (`PiezoQuartz`) transmit fast internal phonons.
@@ -153,8 +153,7 @@ Zero-Readback Body Force/Probe Reduction (reduce_body.wgsl)   Bevy Field Canvas 
 ## Documentation & References
 
 - [**Philosophy (`philosophy.md`)**](./philosophy.md): Relation-first computing, Bohm-Hiley active information, Hillman's situated image, and living actor ecologies.
-- [**Field Mathematics (`docs/field_math.md`)**](./docs/field_math.md): Governing PDEs, Yee-staggered stencils, saturating soliton law, Bohmian potential $Q$, and CFL stability bounds.
-- [**Field-First Engine Whitepaper (`docs/field_first_whitepaper.md`)**](./docs/field_first_whitepaper.md): Wave-matter runtime architecture, pilot-wave guidance, topological cohesion, and GPU/Bevy pipeline.
+- [**Field-First Engine Whitepaper (`docs/field_first_whitepaper.md`)**](./docs/field_first_whitepaper.md): Governing PDEs, saturating soliton math, pilot-wave guidance ($Q$), topological cohesion, and zero-readback WGPU/Bevy architecture.
 - [**Audio Overview (`docs/overview_audio.md`)**](./docs/overview_audio.md): Material-tuned modal synthesis, silent quantum vacuum gating, and `bevy_audio` integration.
 
 ---

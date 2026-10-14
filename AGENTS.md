@@ -22,3 +22,5 @@ Before planning, editing code, or modifying documentation in this repository, **
    - Do not duplicate windowing, input, ECS, asset, or audio output/sink infrastructure that Bevy already provides (e.g., use `bevy_audio`'s `Decodable` / `AudioPlayer` / `AudioSink` rather than bespoke `cpal` device threads). Keep `dzog-core` focused strictly on PDE field physics, wave-matter coupling, and pure sample math.
 5. **Verification Gate**:
    - Run `cargo test --workspace` after changes to verify analytical propagation, impedance reflection, energy conservation, soliton cohesion, and gameplay physics.
+6. **Whitepaper & Documentation Style (`docs/field_first_whitepaper.md`)**:
+   - Make sure the whitepaper is written such that each technical concept is always first simply explained before going into details and WHY the technical idea is important to the engine... then go into the details. Make sure the whole paper flows when reading it from top to bottom as being in the shoes of a general computer scientist who may not understand quantum/field mechanics or why they are interesting to use for a new simulation engine.
