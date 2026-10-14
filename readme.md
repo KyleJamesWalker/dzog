@@ -3,7 +3,7 @@
 
 **Note: This is highly experimental work for a new proof of concept simulator using quantum field theory.**
 
-**A GPU-accelerated 2D wave-matter and field-physics engine for Bevy.**
+Dzog Simulator is a GPU-accelerated quantum 2D wave-matter field-physics engine in Rust.
 
 Conventional game engines treat space as an empty coordinate system populated by isolated rigid bodies (`struct Asteroid { hp: 2 }`) that ignore one another until a bounding-box check triggers an imperative callback. **Dzog Simulator** replaces object-centric execution with a continuous physical medium governed by wave mechanics, solid-state crystal cohesion, and pilot-wave guidance.
 
