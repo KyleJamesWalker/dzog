@@ -35,6 +35,16 @@ cargo run -p asteroids -- --bench
 cargo run -p pong -- --bench
 ```
 
+### Builds and web demos
+
+Each `v*` tag publishes desktop builds (Linux x86_64/aarch64, macOS aarch64, Windows x86_64) and a web build to [Releases](https://github.com/jadbox/dzog/releases); pushes to `main` deploy the web demos to GitHub Pages. To build the web demos locally (requires the `wasm32-unknown-unknown` target and a `wasm-bindgen` CLI matching `Cargo.lock`):
+
+```bash
+tools/build_web.sh            # writes dist/web; serve it with any static file server
+```
+
+The web builds step the field on the `dzog-core` CPU reference solver, since the browser cannot block on a GPU readback each frame; desktop builds keep the WGPU compute pipeline.
+
 ---
 
 ## Theoretical Foundation: Field Mechanics as Computation
