@@ -30,6 +30,7 @@ pub use boundary::{BoundaryMask, OuterBoundaryRule};
 pub use energy::FieldEnergy;
 pub use excitation::{
     AntiphaseShieldPulse, DirectionalWavePacket, GaussianImpulse, ReactionThrusterPlume,
+    SolitonCarrierPulse,
 };
 pub use gravity::{GravityField, GravityWell};
 pub use grid::{AcousticState, GridConfig};

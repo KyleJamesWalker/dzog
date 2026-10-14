@@ -92,6 +92,14 @@ When $|p_{i,j}^{n+1}| > p_{\text{yield}; i,j}$, local structural cohesion erodes
 
 $$C_{i,j}^{n+1} = \max\!\left(0, \; C_{i,j}^n - \eta_{\text{erode}} \left(|p_{i,j}^{n+1}| - p_{\text{yield}; i,j}\right) \Delta t\right)$$
 
+### Pass 3: Screened Reaction-Diffusion Luminescence Update (`luminescence.wgsl`)
+
+Field-driven radiative glow $L_{i,j}^n \in [0, 4]$ evolves on the lattice via material-tuned diffusion $D_{i,j} \propto c_{i,j} = \sqrt{K_{i,j}/\rho_{i,j}}$ (enhanced along semi-permeable crystal waveguides $0.15 \le C_{i,j} < 0.55$), exponential radiative decay $e^{-\gamma_L \Delta t}$, and wave/piezoelectric source coupling:
+
+$$L_{i,j}^{n+1} = \text{clamp}\!\left(e^{-\gamma_L \Delta t}\left(L_{i,j}^n + D_{i,j} \Delta t \, \nabla^2 L_{i,j}^n\right) + \Delta t \left(S_{\text{wave}}(p, \mathbf{v}) + S_{\text{piezo}}(p, C)\right), \; 0, \; 4\right)$$
+
+Spatial gradients $\nabla L_{i,j}$ dynamically illuminate nearby 3D mineralogical crystal facets (`CohesiveBody::sample_crystal_facet`).
+
 ---
 
 ## 6. CFL Stability Envelope & Hamiltonian Energy

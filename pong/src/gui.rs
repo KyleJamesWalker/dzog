@@ -22,10 +22,7 @@ pub struct ScoreText;
 pub struct StatusText;
 
 pub fn launch_gui() {
-    let mut game = BreakoutFieldGame::new(128, 80);
-    if !std::env::args().any(|a| a == "--cpu") {
-        game.enable_gpu_acceleration();
-    }
+    let game = BreakoutFieldGame::new(128, 80);
 
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
@@ -135,10 +132,6 @@ fn handle_input(
         game_res.game.toggle_wave_force();
     }
 
-    if keyboard.just_pressed(KeyCode::KeyG) {
-        game_res.game.toggle_gpu_acceleration();
-    }
-
     if keyboard.just_pressed(KeyCode::KeyV) {
         game_res.game.cycle_view_mode();
     }
@@ -228,7 +221,6 @@ fn update_ui(
 
     for mut text in &mut status_query {
         let blast_str = if game.wave_force_enabled { "ON" } else { "OFF" };
-        let gpu_str = if game.is_gpu_accelerated() { "ON" } else { "OFF" };
         let view_str = game.view_mode.label();
         let branch_str = if game.saved_branch.is_some() { "SAVED" } else { "NONE" };
         let pause_str = if game_res.paused { " [PAUSED]" } else { "" };
@@ -246,7 +238,7 @@ fn update_ui(
         };
 
         text.0 = format!(
-            "[A/D] Move | [W] Phase Pulse | [T] Sonic Blast: {blast_str} | [G] GPU: {gpu_str} | [V] {view_str} | [B/U] Branch({branch_str}){pause_str}{action_hint}"
+            "[A/D] Move | [W] Phase Pulse | [T] Sonic Blast: {blast_str} | [V] {view_str} | [B/U] Branch({branch_str}){pause_str}{action_hint}"
         );
     }
 }

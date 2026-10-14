@@ -55,10 +55,12 @@ Instead of terminal ASCII, the engine renders directly to **pixels and shaders**
   [`SolitonFieldGame::render_to_pixel_buffer()`](../pong/src/field_game.rs#L180) rasterizes field pressure, kinetic velocity glow, and boundary walls directly into an RGBA8 retro canvas.
 - **Retro Aesthetic**:
   Phosphor cyan paddles, golden amber soliton core, electric blue wavefronts, and CRT dark background.
-- **Bevy 0.15 Windowing & HUD**:
-  [`pong/src/gui.rs`](../pong/src/gui.rs) bootstraps Bevy 0.15 for window management, 2D orthographic camera, texture asset streaming, and scoreboard HUD.
-- **Audio Work Status**:
-  Audio work is placed **on pause** until specified.
+- **Bevy 0.15 Windowing & Mandatory WGPU Compute**:
+  [`crates/dzog-bevy/src/lib.rs`](../crates/dzog-bevy/src/lib.rs) and [`crates/dzog-wgpu`](../crates/dzog-wgpu) require a WGPU-capable GPU (`GpuContext::shared()`), executing all FDTD substeps (`velocity.wgsl`, `pressure.wgsl`, `luminescence.wgsl`) and body force reductions (`reduce_body.wgsl`) on the GPU.
+- **Asteroids Tech Demo (`asteroids/`)**:
+  Runs on a `240×150` periodic/gravity-well lattice in a `1600×1000` window with 3D-faceted mineralogical asteroids (`PiezoQuartz`, `ObsidianAnvil`, `BismuthCrystal`), continuous `SolitonCarrierPulse` laser luminescence, ship-like `BohmianSaucer` corvettes & `HarmonicWeaver` cruisers, player-like autopilot (`asteroids/src/autopilot.rs`, `[T]` / `--autopilot`), and `ffmpeg` MP4 recording (`--record [file.mp4] --duration <secs>`).
+- **Live Binaural & Modal Audio (`bevy_audio`)**:
+   Cockpits and paddles sample local lattice oscillations into `FieldModalSynthesizer` (`Decodable`).
 
 ---
 

@@ -1,6 +1,9 @@
 //! Bevy 0.15 GUI & `dzog_bevy` integration for Field-First Crystalline Asteroids & Alien Ecology.
 
+use std::io::Write;
+use std::process::{Child, ChildStdin, Command, Stdio};
 use bevy::{
+    app::AppExit,
     audio::{AudioSink, AudioSinkPlayback},
     prelude::*,
 };
@@ -9,11 +12,119 @@ use dzog_bevy::{
 };
 use crate::field_game::AsteroidsFieldGame;
 
+pub struct Mp4VideoRecorder {
+    pub output_path: String,
+    pub child: Child,
+    pub stdin: Option<ChildStdin>,
+    pub scale: usize,
+    pub src_w: usize,
+    pub src_h: usize,
+    pub upscaled_frame: Vec<u8>,
+    pub frames_written: usize,
+    pub max_frames: usize,
+}
+
+impl Mp4VideoRecorder {
+    pub fn new(output_path: String, src_w: usize, src_h: usize, scale: usize, duration_secs: u32) -> Result<Self, String> {
+        let out_w = src_w * scale;
+        let out_h = src_h * scale;
+        let max_frames = (duration_secs.max(1) as usize) * 60;
+
+        let mut child = Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-loglevel",
+                "error",
+                "-f",
+                "rawvideo",
+                "-pixel_format",
+                "rgba",
+                "-video_size",
+                &format!("{out_w}x{out_h}"),
+                "-framerate",
+                "60",
+                "-i",
+                "-",
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                "-preset",
+                "fast",
+                "-crf",
+                "18",
+                &output_path,
+            ])
+            .stdin(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("Failed to spawn ffmpeg for MP4 recording: {e}"))?;
+
+        let stdin = child.stdin.take();
+        Ok(Self {
+            output_path,
+            child,
+            stdin,
+            scale,
+            src_w,
+            src_h,
+            upscaled_frame: vec![0u8; out_w * out_h * 4],
+            frames_written: 0,
+            max_frames,
+        })
+    }
+
+    pub fn write_frame(&mut self, rgba_pixels: &[u8]) -> bool {
+        let out_w = self.src_w * self.scale;
+        let s = self.scale;
+
+        for y in 0..self.src_h {
+            for x in 0..self.src_w {
+                let src_idx = (y * self.src_w + x) * 4;
+                let px = [
+                    rgba_pixels[src_idx],
+                    rgba_pixels[src_idx + 1],
+                    rgba_pixels[src_idx + 2],
+                    255,
+                ];
+                let base_y = y * s;
+                let base_x = x * s;
+                for dy in 0..s {
+                    let row_offset = (base_y + dy) * out_w + base_x;
+                    for dx in 0..s {
+                        let dst_idx = (row_offset + dx) * 4;
+                        self.upscaled_frame[dst_idx..dst_idx + 4].copy_from_slice(&px);
+                    }
+                }
+            }
+        }
+
+        if let Some(stdin) = &mut self.stdin {
+            let _ = stdin.write_all(&self.upscaled_frame);
+        }
+        self.frames_written += 1;
+        self.frames_written >= self.max_frames
+    }
+
+    pub fn finish(&mut self) {
+        if let Some(mut stdin) = self.stdin.take() {
+            let _ = stdin.flush();
+        }
+        let _ = self.child.wait();
+        println!(
+            "Saved MP4 recording to {} ({} frames, {:.1}s)",
+            self.output_path,
+            self.frames_written,
+            self.frames_written as f32 / 60.0
+        );
+    }
+}
+
 #[derive(Resource)]
 pub struct AsteroidsStateResource {
     pub game: AsteroidsFieldGame,
     pub paused: bool,
     pub fire_cooldown: u8,
+    pub recorder: Option<Mp4VideoRecorder>,
 }
 
 #[derive(Component)]
@@ -22,17 +133,74 @@ pub struct HudTopText;
 #[derive(Component)]
 pub struct HudBottomText;
 
-pub fn launch_gui() {
-    let mut game = AsteroidsFieldGame::new(144, 96);
-    if !std::env::args().any(|a| a == "--cpu") {
-        game.enable_gpu_acceleration();
+fn parse_cli_options() -> (bool, Option<(String, u32)>) {
+    let args: Vec<String> = std::env::args().collect();
+    let mut autopilot = args.iter().any(|a| a == "--autopilot");
+    let mut record_enabled = false;
+    let mut record_path = "asteroids_demo.mp4".to_string();
+    let mut duration_secs: u32 = 60;
+
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--record" => {
+                record_enabled = true;
+                if i + 1 < args.len() && !args[i + 1].starts_with("--") {
+                    if let Ok(secs) = args[i + 1].parse::<u32>() {
+                        duration_secs = secs;
+                    } else {
+                        record_path = args[i + 1].clone();
+                    }
+                    i += 1;
+                }
+            }
+            "--duration" | "--seconds" => {
+                if i + 1 < args.len() {
+                    if let Ok(secs) = args[i + 1].parse::<u32>() {
+                        duration_secs = secs;
+                    }
+                    i += 1;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
     }
+
+    if record_enabled && !autopilot && args.iter().any(|a| a == "--autopilot") {
+        autopilot = true;
+    }
+
+    let rec = if record_enabled {
+        Some((record_path, duration_secs))
+    } else {
+        None
+    };
+    (autopilot, rec)
+}
+
+pub fn launch_gui() {
+    let (autopilot, record_cfg) = parse_cli_options();
+    let mut game = AsteroidsFieldGame::new(240, 150);
+    game.autopilot_enabled = autopilot;
+
+    let recorder = record_cfg.and_then(|(path, secs)| {
+        println!(
+            "Recording Asteroids session to '{}' for {}s ({} frames @ 60 FPS)...",
+            path,
+            secs,
+            secs * 60
+        );
+        Mp4VideoRecorder::new(path, game.width, game.height, 6, secs)
+            .map_err(|e| eprintln!("{e}"))
+            .ok()
+    });
 
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "Dzog — Field-First Crystalline Asteroids & Alien Ecology".into(),
-                resolution: (1152.0_f32, 768.0_f32).into(),
+                resolution: (1600.0_f32, 1000.0_f32).into(),
                 ..default()
             }),
             ..default()
@@ -42,6 +210,7 @@ pub fn launch_gui() {
             game,
             paused: false,
             fire_cooldown: 0,
+            recorder,
         })
         .add_systems(Startup, setup_scene)
         .add_systems(Update, (handle_input, step_simulation, update_ui))
@@ -70,8 +239,8 @@ fn setup_scene(
         w,
         h,
         &game_res.game.pixel_buffer,
-        Vec2::new(1080.0, 680.0),
-        -20.0,
+        Vec2::new(1520.0, 900.0),
+        -28.0,
         shared_audio,
     );
 
@@ -128,11 +297,8 @@ fn handle_input(
     if keys.just_pressed(KeyCode::KeyM) {
         game_res.game.toggle_topology_mode();
     }
-    if keys.just_pressed(KeyCode::KeyG) {
-        game_res.game.toggle_gpu_acceleration();
-    }
-    if keys.just_pressed(KeyCode::KeyZ) {
-        game_res.game.zero_readback_gpu = !game_res.game.zero_readback_gpu;
+    if keys.just_pressed(KeyCode::KeyT) {
+        game_res.game.autopilot_enabled = !game_res.game.autopilot_enabled;
     }
     if keys.just_pressed(KeyCode::KeyN) {
         if let Ok(sink) = audio_sinks.get_single() {
@@ -189,6 +355,7 @@ fn step_simulation(
     mut game_res: ResMut<AsteroidsStateResource>,
     image_handle: Res<FieldImageHandle>,
     mut images: ResMut<Assets<Image>>,
+    mut app_exit: EventWriter<AppExit>,
 ) {
     if !game_res.paused {
         game_res.game.step();
@@ -197,6 +364,20 @@ fn step_simulation(
 
     if let Some(image) = images.get_mut(&image_handle.0) {
         image.data.copy_from_slice(&game_res.game.pixel_buffer);
+    }
+
+    let AsteroidsStateResource {
+        ref game,
+        ref mut recorder,
+        ..
+    } = *game_res;
+
+    if let Some(rec) = recorder {
+        if rec.write_frame(&game.pixel_buffer) {
+            rec.finish();
+            *recorder = None;
+            app_exit.send(AppExit::Success);
+        }
     }
 }
 
@@ -207,11 +388,7 @@ fn update_ui(
     mut bot_q: Query<&mut Text, (With<HudBottomText>, Without<HudTopText>)>,
 ) {
     let g = &game_res.game;
-    let backend = if g.is_gpu_accelerated() {
-        if g.zero_readback_gpu { "WGPU-ZeroReadback" } else { "WGPU" }
-    } else {
-        "CPU"
-    };
+    let ap_status = if g.autopilot_enabled { "ON" } else { "OFF" };
 
     if let Ok(mut top) = top_q.get_single_mut() {
         **top = format!(
@@ -233,10 +410,10 @@ fn update_ui(
             _ => "MUTE",
         };
         **bot = format!(
-            "[W/A/D] Thrust/Turn [S] Bow-Brake [Space/E] Soliton/Lance [Shift] Shield [M] {} [V] {} [B/U] Branch [G/Z] {} [N] Audio:{} ({:.2}/{:.2} f_D {:.2})",
+            "[W/A/D] Thrust/Turn [S] Bow-Brake [Space/E] Soliton/Lance [Shift] Shield [T] AutoPilot:{} [M] {} [V] {} [B/U] Branch [N] Audio:{} ({:.2}/{:.2} f_D {:.2})",
+            ap_status,
             g.topology.label(),
             g.view_mode.label(),
-            backend,
             audio_status,
             g.sonifier.rms_left,
             g.sonifier.rms_right,

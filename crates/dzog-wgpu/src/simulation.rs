@@ -55,7 +55,7 @@ pub struct GpuBodyReduction {
     pub max_pressure: f32,
 }
 
-pub const MAX_GPU_BODY_QUERIES: usize = 64;
+pub const MAX_GPU_BODY_QUERIES: usize = 128;
 
 pub struct GpuSimulation {
     pub width: u32,
@@ -75,13 +75,20 @@ pub struct GpuSimulation {
     pub boundary_texture: Texture,
     pub boundary_view: TextureView,
 
+    pub lum_texture_a: Texture,
+    pub lum_view_a: TextureView,
+    pub lum_texture_b: Texture,
+    pub lum_view_b: TextureView,
+
     pub velocity_pipeline: ComputePipeline,
     pub pressure_pipeline: ComputePipeline,
+    pub luminescence_pipeline: ComputePipeline,
     pub impulse_pipeline: ComputePipeline,
     pub reduce_pipeline: ComputePipeline,
 
     pub bind_group_velocity: BindGroup,
     pub bind_group_pressure: BindGroup,
+    pub bind_group_luminescence: BindGroup,
     pub bind_group_impulse: BindGroup,
     pub bind_group_reduce: BindGroup,
 
@@ -90,6 +97,7 @@ pub struct GpuSimulation {
     pub body_reduction_staging: Buffer,
 
     pub staging_buffer: Buffer,
+    pub lum_staging_buffer: Buffer,
 }
 
 impl GpuSimulation {
@@ -185,6 +193,19 @@ impl GpuSimulation {
         });
         let boundary_view = boundary_texture.create_view(&TextureViewDescriptor::default());
 
+        // Luminescence Ping-Pong Textures: (L, 0, 0, 0)
+        let lum_texture_a = ctx.device.create_texture(&TextureDescriptor {
+            label: Some("Luminescence Texture A"),
+            ..texture_desc
+        });
+        let lum_view_a = lum_texture_a.create_view(&TextureViewDescriptor::default());
+
+        let lum_texture_b = ctx.device.create_texture(&TextureDescriptor {
+            label: Some("Luminescence Texture B"),
+            ..texture_desc
+        });
+        let lum_view_b = lum_texture_b.create_view(&TextureViewDescriptor::default());
+
         // Shader Modules
         let vel_shader = ctx.device.create_shader_module(ShaderModuleDescriptor {
             label: Some("Velocity Compute Shader"),
@@ -194,6 +215,11 @@ impl GpuSimulation {
         let press_shader = ctx.device.create_shader_module(ShaderModuleDescriptor {
             label: Some("Pressure Compute Shader"),
             source: ShaderSource::Wgsl(include_str!("shaders/pressure.wgsl").into()),
+        });
+
+        let lum_shader = ctx.device.create_shader_module(ShaderModuleDescriptor {
+            label: Some("Luminescence Compute Shader"),
+            source: ShaderSource::Wgsl(include_str!("shaders/luminescence.wgsl").into()),
         });
 
         let impulse_shader = ctx.device.create_shader_module(ShaderModuleDescriptor {
@@ -276,6 +302,15 @@ impl GpuSimulation {
             label: Some("Pressure Pipeline"),
             layout: Some(&pipeline_layout),
             module: &press_shader,
+            entry_point: Some("main"),
+            compilation_options: PipelineCompilationOptions::default(),
+            cache: None,
+        });
+
+        let luminescence_pipeline = ctx.device.create_compute_pipeline(&ComputePipelineDescriptor {
+            label: Some("Luminescence Pipeline"),
+            layout: Some(&pipeline_layout),
+            module: &lum_shader,
             entry_point: Some("main"),
             compilation_options: PipelineCompilationOptions::default(),
             cache: None,
@@ -365,6 +400,19 @@ impl GpuSimulation {
                 BindGroupEntry { binding: 2, resource: BindingResource::TextureView(&material_view) },
                 BindGroupEntry { binding: 3, resource: BindingResource::TextureView(&boundary_view) },
                 BindGroupEntry { binding: 4, resource: BindingResource::TextureView(&view_a) },
+            ],
+        });
+
+        // Pass 3 BindGroup: Read State A + Material + Lum A -> Write Lum B
+        let bind_group_luminescence = ctx.device.create_bind_group(&BindGroupDescriptor {
+            label: Some("Luminescence BindGroup (Lum A -> Lum B)"),
+            layout: &bind_group_layout,
+            entries: &[
+                BindGroupEntry { binding: 0, resource: params_buffer.as_entire_binding() },
+                BindGroupEntry { binding: 1, resource: BindingResource::TextureView(&view_a) },
+                BindGroupEntry { binding: 2, resource: BindingResource::TextureView(&material_view) },
+                BindGroupEntry { binding: 3, resource: BindingResource::TextureView(&lum_view_a) },
+                BindGroupEntry { binding: 4, resource: BindingResource::TextureView(&lum_view_b) },
             ],
         });
 
@@ -480,10 +528,16 @@ impl GpuSimulation {
             ],
         });
 
-        // Staging buffer for readback
+        // Staging buffers for readback
         let bytes_per_row = (w * 16 + 255) & !255; // WGPU row alignment: 256 bytes
         let staging_buffer = ctx.device.create_buffer(&BufferDescriptor {
             label: Some("Simulation Staging Readback Buffer"),
+            size: (bytes_per_row * h) as u64,
+            usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let lum_staging_buffer = ctx.device.create_buffer(&BufferDescriptor {
+            label: Some("Luminescence Staging Readback Buffer"),
             size: (bytes_per_row * h) as u64,
             usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
             mapped_at_creation: false,
@@ -503,18 +557,25 @@ impl GpuSimulation {
             material_view,
             boundary_texture,
             boundary_view,
+            lum_texture_a,
+            lum_view_a,
+            lum_texture_b,
+            lum_view_b,
             velocity_pipeline,
             pressure_pipeline,
+            luminescence_pipeline,
             impulse_pipeline,
             reduce_pipeline,
             bind_group_velocity,
             bind_group_pressure,
+            bind_group_luminescence,
             bind_group_impulse,
             bind_group_reduce,
             body_query_buffer,
             body_reduction_buffer,
             body_reduction_staging,
             staging_buffer,
+            lum_staging_buffer,
         };
 
         sim.upload_state(ctx, state);
@@ -524,16 +585,34 @@ impl GpuSimulation {
         Ok(sim)
     }
 
-    /// Upload CPU state to GPU Texture A.
+    /// Upload CPU state to GPU Texture A and Luminescence Texture A.
     pub fn upload_state(&self, ctx: &GpuContext, state: &AcousticState) {
         let count = state.config.cell_count();
+        let has_lum = state.luminescence.len() == count;
         let mut buffer = Vec::with_capacity(count * 4);
+        let mut lum_buf = Vec::with_capacity(count * 4);
         for i in 0..count {
             buffer.push(state.pressure[i]);
             buffer.push(state.vx[i]);
             buffer.push(state.vy[i]);
             buffer.push(0.0f32);
+
+            lum_buf.push(if has_lum { state.luminescence[i] } else { 0.0f32 });
+            lum_buf.push(0.0f32);
+            lum_buf.push(0.0f32);
+            lum_buf.push(0.0f32);
         }
+
+        let extent = Extent3d {
+            width: self.width,
+            height: self.height,
+            depth_or_array_layers: 1,
+        };
+        let layout = TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(self.width * 16),
+            rows_per_image: Some(self.height),
+        };
 
         ctx.queue.write_texture(
             TexelCopyTextureInfo {
@@ -543,16 +622,20 @@ impl GpuSimulation {
                 aspect: TextureAspect::All,
             },
             bytemuck::cast_slice(&buffer),
-            TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(self.width * 16),
-                rows_per_image: Some(self.height),
+            layout,
+            extent,
+        );
+
+        ctx.queue.write_texture(
+            TexelCopyTextureInfo {
+                texture: &self.lum_texture_a,
+                mip_level: 0,
+                origin: Origin3d::ZERO,
+                aspect: TextureAspect::All,
             },
-            Extent3d {
-                width: self.width,
-                height: self.height,
-                depth_or_array_layers: 1,
-            },
+            bytemuck::cast_slice(&lum_buf),
+            layout,
+            extent,
         );
     }
 
@@ -721,17 +804,59 @@ impl GpuSimulation {
                 pass.set_bind_group(0, &self.bind_group_pressure, &[]);
                 pass.dispatch_workgroups(workgroups_x, workgroups_y, 1);
             }
+
+            // Pass 3: Screened reaction-diffusion luminescence update (Lum A -> Lum B -> Lum A)
+            {
+                let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+                    label: Some("Luminescence Pass"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&self.luminescence_pipeline);
+                pass.set_bind_group(0, &self.bind_group_luminescence, &[]);
+                pass.dispatch_workgroups(workgroups_x, workgroups_y, 1);
+            }
+
+            encoder.copy_texture_to_texture(
+                TexelCopyTextureInfo {
+                    texture: &self.lum_texture_b,
+                    mip_level: 0,
+                    origin: Origin3d::ZERO,
+                    aspect: TextureAspect::All,
+                },
+                TexelCopyTextureInfo {
+                    texture: &self.lum_texture_a,
+                    mip_level: 0,
+                    origin: Origin3d::ZERO,
+                    aspect: TextureAspect::All,
+                },
+                Extent3d {
+                    width: self.width,
+                    height: self.height,
+                    depth_or_array_layers: 1,
+                },
+            );
         }
 
         ctx.queue.submit(std::iter::once(encoder.finish()));
     }
 
-    /// Read back simulation state from GPU Texture A to CPU AcousticState.
-    pub fn readback_state(&self, ctx: &GpuContext) -> AcousticState {
+    /// Read back simulation state from GPU Texture A & Luminescence Texture A into an existing `AcousticState`.
+    pub fn readback_state_into(&self, ctx: &GpuContext, state: &mut AcousticState) {
         let bytes_per_row = (self.width * 16 + 255) & !255;
         let mut encoder = ctx.device.create_command_encoder(&CommandEncoderDescriptor {
             label: Some("Readback Encoder"),
         });
+
+        let extent = Extent3d {
+            width: self.width,
+            height: self.height,
+            depth_or_array_layers: 1,
+        };
+        let layout = TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(bytes_per_row),
+            rows_per_image: Some(self.height),
+        };
 
         encoder.copy_texture_to_buffer(
             TexelCopyTextureInfo {
@@ -742,48 +867,60 @@ impl GpuSimulation {
             },
             TexelCopyBufferInfo {
                 buffer: &self.staging_buffer,
-                layout: TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(bytes_per_row),
-                    rows_per_image: Some(self.height),
-                },
+                layout,
             },
-            Extent3d {
-                width: self.width,
-                height: self.height,
-                depth_or_array_layers: 1,
+            extent,
+        );
+
+        encoder.copy_texture_to_buffer(
+            TexelCopyTextureInfo {
+                texture: &self.lum_texture_a,
+                mip_level: 0,
+                origin: Origin3d::ZERO,
+                aspect: TextureAspect::All,
             },
+            TexelCopyBufferInfo {
+                buffer: &self.lum_staging_buffer,
+                layout,
+            },
+            extent,
         );
 
         ctx.queue.submit(std::iter::once(encoder.finish()));
 
-        // Map buffer and read floats
         let slice = self.staging_buffer.slice(..);
+        let lum_slice = self.lum_staging_buffer.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
+        let tx2 = tx.clone();
         slice.map_async(MapMode::Read, move |result| {
             tx.send(result).unwrap();
+        });
+        lum_slice.map_async(MapMode::Read, move |result| {
+            tx2.send(result).unwrap();
         });
 
         ctx.device.poll(Maintain::Wait);
         rx.recv().unwrap().unwrap();
+        rx.recv().unwrap().unwrap();
 
-        let grid = GridConfig::new(
-            self.width as usize,
-            self.height as usize,
-            self.params.dx,
-            self.params.dy,
-        );
-        let mut state = AcousticState::new(grid);
+        let grid = state.config;
+        let count = grid.cell_count();
+        if state.luminescence.len() != count {
+            state.luminescence.resize(count, 0.0);
+        }
 
         {
             let view = slice.get_mapped_range();
+            let lum_view = lum_slice.get_mapped_range();
             let row_bytes = (self.width * 16) as usize;
             let pitch = bytes_per_row as usize;
 
             for y in 0..self.height as usize {
                 let row_start = y * pitch;
                 let row_slice = &view[row_start..row_start + row_bytes];
+                let lum_row_slice = &lum_view[row_start..row_start + row_bytes];
                 let floats: &[f32] = bytemuck::cast_slice(row_slice);
+                let lum_floats: &[f32] = bytemuck::cast_slice(lum_row_slice);
 
                 for x in 0..self.width as usize {
                     let idx = grid.index(x, y);
@@ -791,11 +928,25 @@ impl GpuSimulation {
                     state.pressure[idx] = floats[f_idx];
                     state.vx[idx] = floats[f_idx + 1];
                     state.vy[idx] = floats[f_idx + 2];
+                    state.luminescence[idx] = lum_floats[f_idx];
                 }
             }
         }
 
         self.staging_buffer.unmap();
+        self.lum_staging_buffer.unmap();
+    }
+
+    /// Read back simulation state from GPU Texture A to CPU AcousticState.
+    pub fn readback_state(&self, ctx: &GpuContext) -> AcousticState {
+        let grid = GridConfig::new(
+            self.width as usize,
+            self.height as usize,
+            self.params.dx,
+            self.params.dy,
+        );
+        let mut state = AcousticState::new(grid);
+        self.readback_state_into(ctx, &mut state);
         state
     }
 

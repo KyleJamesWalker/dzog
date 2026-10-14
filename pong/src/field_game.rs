@@ -267,7 +267,7 @@ pub struct BreakoutFieldGame {
     pub view_mode: FieldViewMode,
     pub field_energy: FieldEnergy,
     pub saved_branch: Option<GameBranchSnapshot>,
-    pub gpu_accel: Option<GpuFieldAccelerator>,
+    pub gpu_accel: GpuFieldAccelerator,
     pub sonifier: BinauralCockpitSonifier,
     pub shared_audio_frame: std::sync::Arc<std::sync::Mutex<FieldAcousticFrame>>,
 
@@ -305,6 +305,7 @@ impl BreakoutFieldGame {
             threshold_decay: 0.065,
         };
         let config = SolverConfig::new(dt, 0.7, 4).with_nonlinearity(nl);
+        let gpu_accel = GpuFieldAccelerator::new(&state, &material, &boundary, &config);
         let solver = AcousticSolver::new(state, material, boundary, config).unwrap();
 
         let paddle_w = 20;
@@ -345,7 +346,7 @@ impl BreakoutFieldGame {
                 total: 0.0,
             },
             saved_branch: None,
-            gpu_accel: None,
+            gpu_accel,
             sonifier: BinauralCockpitSonifier::new(4.0, 2048),
             shared_audio_frame: std::sync::Arc::new(std::sync::Mutex::new(
                 FieldAcousticFrame::default(),
@@ -357,36 +358,6 @@ impl BreakoutFieldGame {
         game.sync_all_brick_boundaries();
         game.sync_paddle_boundaries();
         game
-    }
-
-    /// Initialize hardware WGPU compute acceleration for FDTD substeps.
-    pub fn enable_gpu_acceleration(&mut self) -> bool {
-        if self.gpu_accel.is_some() {
-            return true;
-        }
-        self.gpu_accel = GpuFieldAccelerator::try_new(
-            &self.solver.state,
-            &self.solver.material,
-            &self.solver.boundary,
-            &self.solver.config,
-        );
-        self.gpu_accel.is_some()
-    }
-
-    /// Toggle hardware WGPU compute acceleration on/off (`[G]`).
-    pub fn toggle_gpu_acceleration(&mut self) -> bool {
-        if self.gpu_accel.is_some() {
-            self.gpu_accel = None;
-            false
-        } else {
-            self.enable_gpu_acceleration()
-        }
-    }
-
-    /// Whether hardware WGPU compute acceleration is currently active.
-    #[inline]
-    pub fn is_gpu_accelerated(&self) -> bool {
-        self.gpu_accel.is_some()
     }
 
     /// Layout 4 rows of 8 solid-state crystal bricks (32 bricks total).
@@ -1061,19 +1032,16 @@ impl BreakoutFieldGame {
             trace.inject(&mut self.solver.state);
         }
 
-        // Advance Dzog FDTD field simulation (on WGPU compute pipeline when enabled, or CPU reference)
-        if let Some(gpu) = &self.gpu_accel {
-            let f_substeps = self.solver.config.substeps_per_macro;
-            gpu.sim.upload_state(&gpu.ctx, &self.solver.state);
-            gpu.sim.upload_material(&gpu.ctx, &self.solver.material);
-            gpu.sim.upload_boundary(&gpu.ctx, &self.solver.boundary);
-            gpu.sim.step(&gpu.ctx, f_substeps);
-            self.solver.state = gpu.sim.readback_state(&gpu.ctx);
-            self.solver.current_step += f_substeps;
-            self.solver.current_time += self.solver.config.dt * f_substeps as f32;
-        } else {
-            self.solver.advance_macro();
-        }
+        // Advance Dzog FDTD field simulation on the WGPU compute pipeline
+        let f_substeps = self.solver.config.substeps_per_macro;
+        let gpu = &self.gpu_accel;
+        gpu.sim.upload_state(&gpu.ctx, &self.solver.state);
+        gpu.sim.upload_material(&gpu.ctx, &self.solver.material);
+        gpu.sim.upload_boundary(&gpu.ctx, &self.solver.boundary);
+        gpu.sim.step(&gpu.ctx, f_substeps);
+        gpu.sim.readback_state_into(&gpu.ctx, &mut self.solver.state);
+        self.solver.current_step += f_substeps;
+        self.solver.current_time += self.solver.config.dt * f_substeps as f32;
 
         // 8. Sympathetic Crystal Cleaving (Wave-Induced Domino Shatter)
         if self.wave_force_enabled && self.in_play {

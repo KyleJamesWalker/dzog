@@ -21,11 +21,11 @@ fn main() {
 
 fn run_headless_benchmark() {
     println!("=== Dzog Field-First Crystalline Asteroids & Alien Ecology Benchmark ===");
-    let mut game = AsteroidsFieldGame::new(144, 96);
+    let mut game = AsteroidsFieldGame::new(240, 150);
 
     if let Ok(ctx) = pollster::block_on(GpuContext::init_headless()) {
         println!(
-            "[1/3] Benchmarking Zero-Readback WGPU Compute + Body Force Reduction (144x96 periodic grid)..."
+            "[1/3] Benchmarking Zero-Readback WGPU Compute + Body Force Reduction (240x150 periodic grid)..."
         );
         let gpu_sim = GpuSimulation::new(
             &ctx,

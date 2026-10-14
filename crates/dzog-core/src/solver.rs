@@ -308,6 +308,11 @@ impl AcousticSolver {
             }
         }
 
+        // -------------------------------------------------------------
+        // Pass 3: Screened reaction-diffusion luminescence field L(x, y)
+        // -------------------------------------------------------------
+        self.step_luminescence();
+
         // Advance simulation clock
         self.current_step += 1;
         self.current_time += dt;
@@ -318,6 +323,86 @@ impl AcousticSolver {
         }
     }
 
+    /// Advance the exciton / radiative luminescence field `L(x, y)` by one substep `dt`:
+    /// `dL/dt = D(x) Laplacian(L) - gamma_L * L + S_wave(p, v) + S_piezo(p, C)`
+    /// where `D(x)` scales with local wave speed `sqrt(K / rho)` and channels through crystal waveguides.
+    pub fn step_luminescence(&mut self) {
+        let dt = self.config.dt;
+        let w = self.state.config.width;
+        let h = self.state.config.height;
+        let count = w * h;
+        if self.state.luminescence.len() != count {
+            self.state.luminescence.resize(count, 0.0);
+        }
+
+        let periodic = self.boundary.outer_rule == OuterBoundaryRule::Periodic;
+        let inv_dx2 = 1.0 / (self.state.config.dx * self.state.config.dx);
+        let inv_dy2 = 1.0 / (self.state.config.dy * self.state.config.dy);
+        let has_cohesion = self.material.cohesion.len() == count;
+        let decay_l = (-1.35 * dt).exp();
+
+        let old_l = self.state.luminescence.clone();
+        for y in 0..h {
+            for x in 0..w {
+                let idx = y * w + x;
+                let l_c = old_l[idx];
+
+                let (l_e, l_w, l_n, l_s) = if periodic {
+                    let xe = (x + 1) % w;
+                    let xw = (x + w - 1) % w;
+                    let yn = (y + 1) % h;
+                    let ys = (y + h - 1) % h;
+                    (
+                        old_l[y * w + xe],
+                        old_l[y * w + xw],
+                        old_l[yn * w + x],
+                        old_l[ys * w + x],
+                    )
+                } else {
+                    let le = if x + 1 < w { old_l[y * w + (x + 1)] } else { 0.0 };
+                    let lw = if x > 0 { old_l[y * w + (x - 1)] } else { 0.0 };
+                    let ln = if y + 1 < h { old_l[(y + 1) * w + x] } else { 0.0 };
+                    let ls = if y > 0 { old_l[(y - 1) * w + x] } else { 0.0 };
+                    (le, lw, ln, ls)
+                };
+
+                let lap_l = (l_e - 2.0 * l_c + l_w) * inv_dx2 + (l_n - 2.0 * l_c + l_s) * inv_dy2;
+                let rho = self.material.density[idx];
+                let k = self.material.bulk_modulus[idx];
+                let c_speed = (k / rho).sqrt();
+                let coh = if has_cohesion { self.material.cohesion[idx] } else { 0.0 };
+
+                // Waveguide channels (0.15 <= C < 0.55) and fast PiezoQuartz transmit luminescence rapidly
+                let diff_coeff = if (0.15..0.55).contains(&coh) {
+                    0.26 * c_speed
+                } else {
+                    0.18 * c_speed
+                };
+
+                let p_abs = self.state.pressure[idx].abs();
+                let vx = self.state.vx[idx];
+                let vy = self.state.vy[idx];
+                let v_sq = vx * vx + vy * vy;
+
+                // Source excitation from intense wave packets / solitons and piezoelectric crystal stress
+                let wave_src = if p_abs > 0.24 {
+                    (p_abs - 0.24) * 0.55 + v_sq * 0.28
+                } else {
+                    0.0
+                };
+                let piezo_src = if coh >= 0.15 && p_abs > 0.12 {
+                    let piezo_gain = if rho < 0.90 { 1.35 } else { 0.75 };
+                    p_abs * (1.25 - 0.45 * coh) * piezo_gain
+                } else {
+                    0.0
+                };
+
+                let l_next = decay_l * (l_c + diff_coeff * lap_l * dt) + (wave_src + piezo_src) * dt;
+                self.state.luminescence[idx] = l_next.clamp(0.0, 4.0);
+            }
+        }
+    }
+
     /// Advance simulation by `substeps_per_macro` substeps.
     pub fn advance_macro(&mut self) {
         for _ in 0..self.config.substeps_per_macro {
@@ -325,7 +410,7 @@ impl AcousticSolver {
         }
     }
 
-    /// Advect the dynamic field `(p, vx, vy)` by integer cell shifts `(shift_x, shift_y)`
+    /// Advect the dynamic field `(p, vx, vy, luminescence)` by integer cell shifts `(shift_x, shift_y)`
     /// for camera-centered open-space scrolling lattices. Newly exposed border cells are zeroed.
     pub fn advect_lattice(&mut self, shift_x: isize, shift_y: isize) {
         if shift_x == 0 && shift_y == 0 {
@@ -338,6 +423,8 @@ impl AcousticSolver {
         let mut new_p = vec![0.0f32; count];
         let mut new_vx = vec![0.0f32; count];
         let mut new_vy = vec![0.0f32; count];
+        let mut new_lum = vec![0.0f32; count];
+        let has_lum = self.state.luminescence.len() == count;
 
         for y in 0..h {
             let src_y = y as isize + shift_y;
@@ -354,11 +441,15 @@ impl AcousticSolver {
                 new_p[dst_idx] = self.state.pressure[src_idx];
                 new_vx[dst_idx] = self.state.vx[src_idx];
                 new_vy[dst_idx] = self.state.vy[src_idx];
+                if has_lum {
+                    new_lum[dst_idx] = self.state.luminescence[src_idx];
+                }
             }
         }
 
         self.state.pressure = new_p;
         self.state.vx = new_vx;
         self.state.vy = new_vy;
+        self.state.luminescence = new_lum;
     }
 }

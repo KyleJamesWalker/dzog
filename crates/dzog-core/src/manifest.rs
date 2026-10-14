@@ -101,6 +101,9 @@ impl Checkpoint {
             self.config,
         )?;
         let count = solver.material.config.cell_count();
+        if solver.state.luminescence.len() != count {
+            solver.state.luminescence = vec![0.0; count];
+        }
         if solver.material.cohesion.is_empty() {
             solver.material.cohesion = vec![0.0; count];
         }

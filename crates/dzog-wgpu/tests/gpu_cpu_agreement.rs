@@ -53,19 +53,22 @@ fn test_gate1_gpu_cpu_numerical_agreement() {
     let mut max_p_diff = 0.0f32;
     let mut max_vx_diff = 0.0f32;
     let mut max_vy_diff = 0.0f32;
+    let mut max_lum_diff = 0.0f32;
 
     for i in 0..grid.cell_count() {
         let p_diff = (cpu_solver.state.pressure[i] - gpu_state.pressure[i]).abs();
         let vx_diff = (cpu_solver.state.vx[i] - gpu_state.vx[i]).abs();
         let vy_diff = (cpu_solver.state.vy[i] - gpu_state.vy[i]).abs();
+        let lum_diff = (cpu_solver.state.luminescence[i] - gpu_state.luminescence[i]).abs();
 
         if p_diff > max_p_diff { max_p_diff = p_diff; }
         if vx_diff > max_vx_diff { max_vx_diff = vx_diff; }
         if vy_diff > max_vy_diff { max_vy_diff = vy_diff; }
+        if lum_diff > max_lum_diff { max_lum_diff = lum_diff; }
     }
 
     println!(
-        "GPU vs CPU after {substeps} substeps: max_p_diff={max_p_diff:.6}, max_vx_diff={max_vx_diff:.6}, max_vy_diff={max_vy_diff:.6}"
+        "GPU vs CPU after {substeps} substeps: max_p_diff={max_p_diff:.6}, max_vx_diff={max_vx_diff:.6}, max_vy_diff={max_vy_diff:.6}, max_lum_diff={max_lum_diff:.6}"
     );
 
     // Floating-point agreement between WGSL compute shader and CPU solver should be within 1e-4
@@ -80,6 +83,10 @@ fn test_gate1_gpu_cpu_numerical_agreement() {
     assert!(
         max_vy_diff < 1e-4,
         "CPU and GPU vy should agree within numerical tolerance (got {max_vy_diff})"
+    );
+    assert!(
+        max_lum_diff < 1e-4,
+        "CPU and GPU luminescence should agree within numerical tolerance (got {max_lum_diff})"
     );
 
     // 4. Verify GPU-native impulse injection without CPU readback

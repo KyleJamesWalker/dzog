@@ -1,18 +1,17 @@
-//! Bevy 0.15 integration plugin for the Dzog field-physics & rendering engine.
+//! Bevy 0.20 integration plugin for the Dzog field-physics & rendering engine.
 //!
 //! Provides shared Bevy rendering, WGPU compute acceleration, perceptual view modes,
 //! and native `bevy_audio` (`Decodable` / `AudioPlayer`) synthesis so games (`asteroids`, `pong`)
 //! do not duplicate host engine glue.
 
+use std::num::NonZero;
 use std::sync::{Arc, Mutex};
 use bevy::{
+    asset::RenderAssetUsages,
     audio::{AddAudioSource, AudioPlayer, Decodable, PlaybackSettings, Source},
     prelude::*,
     reflect::TypePath,
-    render::{
-        render_asset::RenderAssetUsages,
-        render_resource::{Extent3d, TextureDimension, TextureFormat},
-    },
+    render::render_resource::{Extent3d, TextureDimension, TextureFormat},
 };
 use dzog_core::{
     AcousticState, BoundaryMask, FieldAcousticFrame, FieldModalSynthesizer, MaterialField,
@@ -36,15 +35,16 @@ pub struct GpuFieldAccelerator {
 }
 
 impl GpuFieldAccelerator {
-    pub fn try_new(
+    pub fn new(
         state: &AcousticState,
         material: &MaterialField,
         boundary: &BoundaryMask,
         config: &SolverConfig,
-    ) -> Option<Self> {
-        let ctx = pollster::block_on(GpuContext::init_headless()).ok()?;
-        let sim = GpuSimulation::new(&ctx, state, material, boundary, config).ok()?;
-        Some(Self { ctx, sim })
+    ) -> Self {
+        let ctx = GpuContext::shared().clone();
+        let sim = GpuSimulation::new(&ctx, state, material, boundary, config)
+            .expect("Failed to initialize WGPU simulation pipeline");
+        Self { ctx, sim }
     }
 }
 
@@ -96,18 +96,18 @@ impl Iterator for DzogFieldDecoder {
 
 impl Source for DzogFieldDecoder {
     #[inline]
-    fn current_frame_len(&self) -> Option<usize> {
+    fn current_span_len(&self) -> Option<usize> {
         None
     }
 
     #[inline]
-    fn channels(&self) -> u16 {
-        2
+    fn channels(&self) -> NonZero<u16> {
+        NonZero::new(2).unwrap()
     }
 
     #[inline]
-    fn sample_rate(&self) -> u32 {
-        FieldModalSynthesizer::DEFAULT_SAMPLE_RATE
+    fn sample_rate(&self) -> NonZero<u32> {
+        NonZero::new(FieldModalSynthesizer::DEFAULT_SAMPLE_RATE).unwrap()
     }
 
     #[inline]
@@ -123,7 +123,6 @@ pub struct DzogFieldAudioSource {
 }
 
 impl Decodable for DzogFieldAudioSource {
-    type DecoderItem = f32;
     type Decoder = DzogFieldDecoder;
 
     fn decoder(&self) -> Self::Decoder {

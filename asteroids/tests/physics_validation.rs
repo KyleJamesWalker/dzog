@@ -194,16 +194,12 @@ fn test_thruster_backblast_and_field_brake_and_modes() {
     assert!(game.restore_branch_checkpoint());
     assert_eq!(game.topology, WorldTopologyMode::ToroidalPeriodic);
 
-    // Test GPU-accelerated & Zero-Readback stepping when WGPU adapter is present
-    if game.enable_gpu_acceleration() {
-        game.zero_readback_gpu = true;
-        game.rotate_ship(1.0);
-        game.step();
-        assert!(game.is_gpu_accelerated());
-    }
+    // Test GPU-accelerated stepping and Autopilot mode
+    game.autopilot_enabled = true;
+    game.step();
+    game.autopilot_enabled = false;
 
     // Verify that moving/thrusting/rotating the ship in open space generates ZERO sound
-    game.gpu_accel = None;
     game.asteroids.clear();
     game.aliens.clear();
     game.bolts.clear();

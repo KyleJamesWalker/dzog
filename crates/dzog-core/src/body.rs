@@ -126,7 +126,7 @@ impl CohesiveBody {
         seed: u32,
         class: MineralClass,
     ) -> Self {
-        let local_size = ((target_radius * 2.4).ceil() as usize).clamp(8, 24);
+        let local_size = ((target_radius * 2.4).ceil() as usize).clamp(8, 28);
         let count = local_size * local_size;
         let mut occupied = vec![false; count];
         let mut cohesion = vec![0.0f32; count];
@@ -147,7 +147,9 @@ impl CohesiveBody {
                 let h0 = (((sector_idx.wrapping_mul(1103515245).wrapping_add(seed)) >> 16) & 0xFF) as f32 / 255.0;
                 let next_sector = (sector_idx + 1) % (sides as u32);
                 let h1 = (((next_sector.wrapping_mul(1103515245).wrapping_add(seed)) >> 16) & 0xFF) as f32 / 255.0;
-                let facet_r = target_radius * (0.78 + 0.24 * (h0 * (1.0 - frac) + h1 * frac));
+                // Secondary angular harmonic for crisp mineralogical facets
+                let sub_chord = (sector * std::f32::consts::PI).sin().abs() * 0.06;
+                let facet_r = target_radius * (0.78 + 0.24 * (h0 * (1.0 - frac) + h1 * frac) - sub_chord);
 
                 if r <= facet_r {
                     let idx = ly * local_size + lx;
@@ -180,9 +182,9 @@ impl CohesiveBody {
         body
     }
 
-    /// Generate an alien saucer hull with a resonant central cavity.
+    /// Generate an alien saucer-corvette hull with swept lateral wing pods and a resonant central core.
     pub fn new_saucer(id: u32, x: f32, y: f32, outer_radius: f32) -> Self {
-        let local_size = ((outer_radius * 2.4).ceil() as usize).clamp(10, 20);
+        let local_size = ((outer_radius * 2.4).ceil() as usize).clamp(10, 22);
         let count = local_size * local_size;
         let mut occupied = vec![false; count];
         let mut cohesion = vec![0.0f32; count];
@@ -191,13 +193,60 @@ impl CohesiveBody {
         for ly in 0..local_size {
             for lx in 0..local_size {
                 let dx = lx as f32 - center;
-                let dy = (ly as f32 - center) * 1.35; // Saucer disc aspect ratio
+                let dy = (ly as f32 - center) * 1.28; // Saucer corvette aspect ratio
                 let r = (dx * dx + dy * dy).sqrt();
-                if r <= outer_radius {
+                let wing_pod = dx.abs() <= outer_radius * 1.05 && (ly as f32 - center).abs() <= outer_radius * 0.34;
+                if r <= outer_radius || wing_pod {
                     let idx = ly * local_size + lx;
                     occupied[idx] = true;
                     // Central resonant core is slightly more sensitive to focused phase-lance shots
                     cohesion[idx] = if r < outer_radius * 0.35 { 0.78 } else { 0.98 };
+                }
+            }
+        }
+
+        let mut body = Self {
+            id,
+            x,
+            y,
+            vx: 0.0,
+            vy: 0.0,
+            theta: 0.0,
+            omega: 0.0,
+            local_size,
+            occupied,
+            cohesion,
+            material: BodyMaterialSpec::for_class(MineralClass::AlienResonator),
+            mass: 1.0,
+            inertia: 1.0,
+            radius: outer_radius,
+            last_fracture_step: None,
+        };
+        body.recompute_mass_properties();
+        body
+    }
+
+    /// Generate a twin-prong Harmonic Weaver cruiser hull with forward tuning-fork mandibles.
+    pub fn new_weaver_ship(id: u32, x: f32, y: f32, outer_radius: f32) -> Self {
+        let local_size = ((outer_radius * 2.4).ceil() as usize).clamp(10, 22);
+        let count = local_size * local_size;
+        let mut occupied = vec![false; count];
+        let mut cohesion = vec![0.0f32; count];
+        let center = (local_size as f32 - 1.0) * 0.5;
+
+        for ly in 0..local_size {
+            for lx in 0..local_size {
+                let dx = lx as f32 - center;
+                let dy = ly as f32 - center;
+                let r = (dx * dx + dy * dy).sqrt();
+                // Aft reactor core + twin forward resonance prongs along +X
+                let in_core = r <= outer_radius * 0.85 && !(dx > outer_radius * 0.20 && dy.abs() < outer_radius * 0.28);
+                let in_prongs = dx >= -outer_radius * 0.3 && dx <= outer_radius * 1.05
+                    && (dy.abs() >= outer_radius * 0.25 && dy.abs() <= outer_radius * 0.68);
+                if in_core || in_prongs {
+                    let idx = ly * local_size + lx;
+                    occupied[idx] = true;
+                    cohesion[idx] = if r < outer_radius * 0.35 { 0.80 } else { 0.96 };
                 }
             }
         }
@@ -334,6 +383,83 @@ impl CohesiveBody {
         let c0 = c00 * (1.0 - fx) + c10 * fx;
         let c1 = c01 * (1.0 - fx) + c11 * fx;
         c0 * (1.0 - fy) + c1 * fy
+    }
+
+    /// Evaluate sub-cell crystalline facet elevation, world-space surface normal `(nx, ny)`,
+    /// and mineralogical ridge highlight at body-local coordinates `(lx, ly)`.
+    #[inline]
+    pub fn sample_crystal_facet(&self, lx: f32, ly: f32) -> (f32, f32, f32, f32) {
+        let center = (self.local_size as f32 - 1.0) * 0.5;
+        let dx = lx - center;
+        let dy = ly - center;
+        let r = (dx * dx + dy * dy).sqrt().max(0.001);
+        let r_norm = (r / self.radius.max(1.0)).clamp(0.0, 1.2);
+        let angle = dy.atan2(dx);
+
+        // Local cohesion gradient for bevels & internal fracture walls
+        let coh_e = self.sample_local_cohesion(lx + 0.65, ly);
+        let coh_w = self.sample_local_cohesion(lx - 0.65, ly);
+        let coh_n = self.sample_local_cohesion(lx, ly + 0.65);
+        let coh_s = self.sample_local_cohesion(lx, ly - 0.65);
+        let bevel_nx = -(coh_e - coh_w);
+        let bevel_ny = -(coh_n - coh_s);
+
+        let (local_nx, local_ny, ridge) = match self.material.class {
+            MineralClass::PiezoQuartz => {
+                // 6-fold hexagonal crystal prism facets
+                let sector = ((angle + std::f32::consts::PI) / (TAU / 6.0)).floor();
+                let facet_ang = sector * (TAU / 6.0) + (TAU / 12.0) - std::f32::consts::PI;
+                let edge_prox = ((angle * 3.0).sin().abs() < 0.16) as i32 as f32;
+                let inner_ring = ((r_norm - 0.52).abs() < 0.08) as i32 as f32;
+                (
+                    facet_ang.cos() * 0.65 + bevel_nx * 0.6,
+                    facet_ang.sin() * 0.65 + bevel_ny * 0.6,
+                    (edge_prox * 0.55 + inner_ring * 0.45).clamp(0.0, 1.0),
+                )
+            }
+            MineralClass::ObsidianAnvil => {
+                // Sharp angular conchoidal fracture planes & dark volcanic ridges
+                let seed_ang = (self.id as f32) * 0.73;
+                let sector = ((angle + std::f32::consts::PI + seed_ang) / (TAU / 5.0)).floor();
+                let facet_ang = sector * (TAU / 5.0) - std::f32::consts::PI;
+                let ridge_line = ((dx * 0.65 + dy * 0.45).sin().abs() < 0.18
+                    || (r_norm > 0.76)) as i32 as f32;
+                (
+                    facet_ang.cos() * 0.75 + bevel_nx * 0.7,
+                    facet_ang.sin() * 0.75 + bevel_ny * 0.7,
+                    ridge_line * 0.75,
+                )
+            }
+            MineralClass::BismuthCrystal => {
+                // Iconic stepped hopper-crystal rectangular terraces
+                let box_r = dx.abs().max(dy.abs()) / self.radius.max(1.0);
+                let terrace = (box_r * 4.5).fract();
+                let step_rim = if terrace < 0.22 || terrace > 0.82 { 0.85 } else { 0.15 };
+                let sx = if dx.abs() >= dy.abs() { dx.signum() } else { 0.0 };
+                let sy = if dy.abs() > dx.abs() { dy.signum() } else { 0.0 };
+                (
+                    sx * 0.65 + bevel_nx * 0.55,
+                    sy * 0.65 + bevel_ny * 0.55,
+                    step_rim,
+                )
+            }
+            MineralClass::AlienResonator => {
+                let ring = ((r_norm - 0.55).abs() < 0.12) as i32 as f32;
+                (
+                    (dx / r) * 0.6 + bevel_nx * 0.5,
+                    (dy / r) * 0.6 + bevel_ny * 0.5,
+                    ring * 0.7,
+                )
+            }
+        };
+
+        // Rotate local normal into world frame (+theta)
+        let cos_t = self.theta.cos();
+        let sin_t = self.theta.sin();
+        let w_nx = local_nx * cos_t - local_ny * sin_t;
+        let w_ny = local_nx * sin_t + local_ny * cos_t;
+        let elev = (1.0 - r_norm * 0.55).clamp(0.15, 1.0);
+        (elev, w_nx, w_ny, ridge)
     }
 
     /// Rasterize this rotating body into the world `MaterialField` and `BoundaryMask`.

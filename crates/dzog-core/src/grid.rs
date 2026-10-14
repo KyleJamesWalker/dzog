@@ -68,6 +68,10 @@ pub struct AcousticState {
     /// North-face vertical acoustic particle velocity vy(x, y). Size: width * height.
     /// Evaluated on the horizontal face between cell (x, y) and (x, y + 1).
     pub vy: Vec<f32>,
+    /// Center exciton / radiative luminescence field L(x, y) >= 0 driven by wave energy,
+    /// Bohmian curvature |Q|, and piezoelectric crystal stress. Size: width * height.
+    #[serde(default)]
+    pub luminescence: Vec<f32>,
 }
 
 impl AcousticState {
@@ -79,6 +83,7 @@ impl AcousticState {
             pressure: vec![0.0; count],
             vx: vec![0.0; count],
             vy: vec![0.0; count],
+            luminescence: vec![0.0; count],
         }
     }
 
@@ -87,6 +92,7 @@ impl AcousticState {
         self.pressure.fill(0.0);
         self.vx.fill(0.0);
         self.vy.fill(0.0);
+        self.luminescence.fill(0.0);
     }
 
     /// Validate that all values are finite.
@@ -268,5 +274,32 @@ impl AcousticState {
         let dvy_dx = (self.vy[idx_r] - self.vy[idx]) / self.config.dx;
         let dvx_dy = (self.vx[idx_t] - self.vx[idx]) / self.config.dy;
         dvy_dx - dvx_dy
+    }
+
+    /// Central-difference scalar luminescence gradient grad(L) = (dL/dx, dL/dy) with optional periodic wrapping.
+    /// Used by cohesive crystal bodies to evaluate dynamic radiative illumination from nearby solitons and blasts.
+    #[inline]
+    pub fn luminescence_gradient_wrapped_at(&self, x: usize, y: usize, periodic: bool) -> (f32, f32) {
+        let w = self.config.width;
+        let h = self.config.height;
+        if self.luminescence.len() != w * h {
+            return (0.0, 0.0);
+        }
+        if !periodic && (x == 0 || x + 1 >= w || y == 0 || y + 1 >= h) {
+            return (0.0, 0.0);
+        }
+        let xe = (x + 1) % w;
+        let xw = (x + w - 1) % w;
+        let yn = (y + 1) % h;
+        let ys = (y + h - 1) % h;
+
+        let l_e = self.luminescence[self.config.index(xe, y)];
+        let l_w = self.luminescence[self.config.index(xw, y)];
+        let l_n = self.luminescence[self.config.index(x, yn)];
+        let l_s = self.luminescence[self.config.index(x, ys)];
+
+        let gx = (l_e - l_w) / (2.0 * self.config.dx);
+        let gy = (l_n - l_s) / (2.0 * self.config.dy);
+        (gx, gy)
     }
 }

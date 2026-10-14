@@ -49,6 +49,9 @@ impl GaussianImpulse {
                 let val = self.amplitude * (-dist_sq / two_sigma_sq).exp();
                 let idx = state.config.index(x, y);
                 state.pressure[idx] += val;
+                if idx < state.luminescence.len() {
+                    state.luminescence[idx] = (state.luminescence[idx] + val.abs() * 0.45).min(4.0);
+                }
             }
         }
     }
@@ -101,6 +104,9 @@ impl DirectionalWavePacket {
                 let idx = state.config.index(x, y);
 
                 state.pressure[idx] += p_val;
+                if idx < state.luminescence.len() {
+                    state.luminescence[idx] = (state.luminescence[idx] + p_val.abs() * 0.55).min(4.0);
+                }
 
                 // Match horizontal velocity on east face
                 let z_x = (material.face_density_east(x, y) * material.bulk_modulus[idx]).sqrt();
@@ -150,6 +156,9 @@ impl GaussianImpulse {
                 let gy = py.rem_euclid(h) as usize;
                 let idx = state.config.index(gx, gy);
                 state.pressure[idx] += val;
+                if idx < state.luminescence.len() {
+                    state.luminescence[idx] = (state.luminescence[idx] + val.abs() * 0.45).min(4.0);
+                }
             }
         }
     }
@@ -184,6 +193,9 @@ impl DirectionalWavePacket {
                 let idx = state.config.index(gx, gy);
 
                 state.pressure[idx] += p_val;
+                if idx < state.luminescence.len() {
+                    state.luminescence[idx] = (state.luminescence[idx] + p_val.abs() * 0.55).min(4.0);
+                }
 
                 let z_x = (material.face_density_east_periodic(gx, gy) * material.bulk_modulus[idx]).sqrt();
                 if z_x > 0.0 {
@@ -322,6 +334,9 @@ impl AntiphaseShieldPulse {
                 state.pressure[idx] = p_old * remain;
                 state.vx[idx] = vx_old * remain;
                 state.vy[idx] = vy_old * remain;
+                if idx < state.luminescence.len() {
+                    state.luminescence[idx] *= remain;
+                }
 
                 let p_new = state.pressure[idx];
                 let vx_new = state.vx[idx];
@@ -333,5 +348,102 @@ impl AntiphaseShieldPulse {
         }
 
         harvested_energy
+    }
+}
+
+/// Continuous Soliton Carrier Coupling (`philosophy.md` §Bohm-Hiley Active Information).
+///
+/// Phase-locks a traveling solitary wave bolt to the staggered lattice `(p, vx, vy, luminescence)`
+/// along its flight path so it continuously sustains a Bohmian quantum potential well `Q`,
+/// exerts grazing radiation pressure `-grad(p)` on nearby shards, and radiates a field-native
+/// exciton luminescence corona `L(x, y)`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct SolitonCarrierPulse {
+    pub x: f32,
+    pub y: f32,
+    pub vx: f32,
+    pub vy: f32,
+    pub sigma: f32,
+    pub carrier_amplitude: f32,
+    pub luminescence_gain: f32,
+}
+
+impl SolitonCarrierPulse {
+    pub fn new(
+        x: f32,
+        y: f32,
+        vx: f32,
+        vy: f32,
+        sigma: f32,
+        carrier_amplitude: f32,
+        luminescence_gain: f32,
+    ) -> Self {
+        Self {
+            x,
+            y,
+            vx,
+            vy,
+            sigma: sigma.max(0.5),
+            carrier_amplitude,
+            luminescence_gain,
+        }
+    }
+
+    /// Coupled carrier injection into the lattice with saturation bound so energy stays finite.
+    pub fn couple_to_lattice(
+        &self,
+        state: &mut AcousticState,
+        material: &MaterialField,
+        periodic: bool,
+    ) {
+        let w = state.config.width as isize;
+        let h = state.config.height as isize;
+        let two_sigma_sq = 2.0 * self.sigma * self.sigma;
+        let speed = (self.vx * self.vx + self.vy * self.vy).sqrt().max(0.001);
+        let dir_x = self.vx / speed;
+        let dir_y = self.vy / speed;
+
+        let radius = (3.0 * self.sigma).ceil() as isize;
+        let cx = self.x.round() as isize;
+        let cy = self.y.round() as isize;
+        let has_lum = state.luminescence.len() == (w as usize) * (h as usize);
+
+        for oy in -radius..=radius {
+            for ox in -radius..=radius {
+                let px = cx + ox;
+                let py = cy + oy;
+                if !periodic && (px < 0 || px >= w || py < 0 || py >= h) {
+                    continue;
+                }
+                let dx = px as f32 - self.x;
+                let dy = py as f32 - self.y;
+                let dist_sq = dx * dx + dy * dy;
+                if dist_sq > 9.0 * self.sigma * self.sigma {
+                    continue;
+                }
+
+                let env = (-dist_sq / two_sigma_sq).exp();
+                let gx = px.rem_euclid(w) as usize;
+                let gy = py.rem_euclid(h) as usize;
+                let idx = state.config.index(gx, gy);
+
+                let p_target = self.carrier_amplitude * env;
+                // Bounded phase-lock: nudge local pressure toward carrier envelope without unbounded blowup
+                if state.pressure[idx] < p_target {
+                    state.pressure[idx] += (p_target - state.pressure[idx]) * 0.42;
+                }
+
+                let z = (material.density[idx] * material.bulk_modulus[idx]).sqrt().max(0.1);
+                let v_target_x = (p_target / z) * dir_x;
+                let v_target_y = (p_target / z) * dir_y;
+                state.vx[idx] += (v_target_x - state.vx[idx]) * 0.30 * env;
+                state.vy[idx] += (v_target_y - state.vy[idx]) * 0.30 * env;
+
+                if has_lum {
+                    let l_boost = self.luminescence_gain * env;
+                    state.luminescence[idx] = (state.luminescence[idx] + l_boost).min(4.0);
+                }
+            }
+        }
     }
 }

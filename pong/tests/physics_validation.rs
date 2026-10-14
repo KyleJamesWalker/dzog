@@ -375,10 +375,6 @@ fn test_paddle_doppler_overcharge_and_phase_pulse() {
 #[test]
 fn test_gpu_accelerated_breakout_stepping() {
     let mut game = BreakoutFieldGame::new(64, 40);
-    if !game.enable_gpu_acceleration() {
-        return;
-    }
-    assert!(game.is_gpu_accelerated());
 
     game.serve();
     for _ in 0..10 {
