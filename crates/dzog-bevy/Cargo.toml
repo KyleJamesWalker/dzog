@@ -1,8 +1,9 @@
 [package]
 name = "dzog-bevy"
-version = "0.1.0"
-edition = "2021"
-license = "MIT"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
 description = "Bevy rendering, WGPU compute acceleration, and procedural field-audio plugin for Dzog"
 
 [dependencies]

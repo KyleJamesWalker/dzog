@@ -2,6 +2,7 @@
 name = "pong"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 description = "Solid-State & Quantum-Vacuum Breakout showcase for the Dzog Bevy field engine"
 

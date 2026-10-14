@@ -14,6 +14,41 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.check.outputs.changed }}
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+      - id: check
+        shell: bash
+        run: |
+          # Extract version from [workspace.package] specifically
+          get_ver() {
+            sed -n '/\[workspace\.package\]/,/\[/p' Cargo.toml | grep '^version =' | head -n 1 | cut -d '"' -f 2
+          }
+          CURR=$(get_ver)
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            git fetch origin ${{ github.base_ref }} --depth=1
+            PREV=$(git show origin/${{ github.base_ref }}:Cargo.toml | sed -n '/\[workspace\.package\]/,/\[/p' | grep '^version =' | head -n 1 | cut -d '"' -f 2 || echo "none")
+          else
+            if git rev-parse HEAD~1 >/dev/null 2>&1; then
+              PREV=$(git show HEAD~1:Cargo.toml | sed -n '/\[workspace\.package\]/,/\[/p' | grep '^version =' | head -n 1 | cut -d '"' -f 2 || echo "none")
+            else
+              PREV="none"
+            fi
+          fi
+          
+          echo "version=$CURR" >> "$GITHUB_OUTPUT"
+          if [ "$CURR" != "$PREV" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
   test:
     runs-on: ubuntu-24.04
     steps:
@@ -32,6 +67,14 @@ jobs:
       - run: cargo test --workspace
 
   desktop:
+    needs: check-version
+    if: needs.check-version.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
     uses: ./.github/workflows/build_desktop.yml
+    with:
+      version: ${{ needs.check-version.outputs.version }}
   web:
+    needs: check-version
+    if: needs.check-version.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
     uses: ./.github/workflows/build_web.yml
+    with:
+      version: ${{ needs.check-version.outputs.version }}

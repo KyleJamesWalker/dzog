@@ -2,6 +2,7 @@
 name = "asteroids"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 description = "Field-First Crystalline Asteroids & Alien Ecology showcase for the Dzog Bevy field engine"
 

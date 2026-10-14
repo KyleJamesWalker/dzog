@@ -1,7 +1,8 @@
 [package]
 name = "dzog-wgpu"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 description = "GPU acceleration and WGSL shaders for Dzog acoustic field runtime"
 
 [dependencies]
