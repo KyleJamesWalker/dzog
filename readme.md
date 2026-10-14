@@ -154,7 +154,7 @@ Zero-Readback Body Force/Probe Reduction (reduce_body.wgsl)   Bevy Field Canvas 
 
 - [**Philosophy (`philosophy.md`)**](./philosophy.md): Relation-first computing, Bohm-Hiley active information, Hillman's situated image, and living actor ecologies.
 - [**Field Mathematics (`docs/field_math.md`)**](./docs/field_math.md): Governing PDEs, Yee-staggered stencils, saturating soliton law, Bohmian potential $Q$, and CFL stability bounds.
-- [**Runtime Architecture (`docs/ARCHITECTURE.md`)**](./docs/ARCHITECTURE.md): Solitary wave mechanics, moving boundary coupling, and Bevy presentation layer.
+- [**Field-First Engine Whitepaper (`docs/field_first_whitepaper.md`)**](./docs/field_first_whitepaper.md): Wave-matter runtime architecture, pilot-wave guidance, topological cohesion, and GPU/Bevy pipeline.
 - [**Audio Overview (`docs/overview_audio.md`)**](./docs/overview_audio.md): Material-tuned modal synthesis, silent quantum vacuum gating, and `bevy_audio` integration.
 
 ---
