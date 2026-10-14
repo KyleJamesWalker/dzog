@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
+  <title>Dzog — {{GAME}}</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #0a0d17; }
+    body { display: grid; place-items: center; }
+    #dzog { outline: none; }
+  </style>
+</head>
+<body>
+  <canvas id="dzog" tabindex="0"></canvas>
+  <script>
+    // Browsers start an AudioContext suspended until a user gesture.
+    (() => {
+      const Base = window.AudioContext || window.webkitAudioContext;
+      if (!Base) return;
+      const contexts = [];
+      window.AudioContext = new Proxy(Base, {
+        construct(target, args) {
+          const ctx = new target(...args);
+          contexts.push(ctx);
+          return ctx;
+        },
+      });
+      const resume = () => contexts.forEach((ctx) => ctx.state === "suspended" && ctx.resume());
+      for (const type of ["pointerdown", "keydown", "touchstart"]) {
+        document.addEventListener(type, resume, { capture: true });
+      }
+    })();
+  </script>
+  <script type="module">
+    import init from "./{{GAME}}.js";
+    document.getElementById("dzog").focus();
+    init();
+  </script>
+</body>
+</html>
