@@ -2,6 +2,7 @@
 
 use std::io::Write;
 use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::{Arc, Mutex};
 use bevy::{
     audio::{AudioSink, AudioSinkPlayback},
     prelude::*,
@@ -9,10 +10,13 @@ use bevy::{
 use dzog_bevy::{
     spawn_field_canvas_and_audio, DzogBevyPlugin, DzogFieldAudioSource, FieldImageHandle,
 };
+use dzog_core::{write_stereo_wav, FieldAcousticFrame, FieldModalSynthesizer};
 use crate::field_game::AsteroidsFieldGame;
 
 pub struct Mp4VideoRecorder {
     pub output_path: String,
+    pub temp_video_path: String,
+    pub temp_wav_path: String,
     pub child: Child,
     pub stdin: Option<ChildStdin>,
     pub scale: usize,
@@ -21,13 +25,25 @@ pub struct Mp4VideoRecorder {
     pub upscaled_frame: Vec<u8>,
     pub frames_written: usize,
     pub max_frames: usize,
+    pub synth: FieldModalSynthesizer,
+    pub audio_left: Vec<f32>,
+    pub audio_right: Vec<f32>,
 }
 
 impl Mp4VideoRecorder {
-    pub fn new(output_path: String, src_w: usize, src_h: usize, scale: usize, duration_secs: u32) -> Result<Self, String> {
+    pub fn new(
+        output_path: String,
+        src_w: usize,
+        src_h: usize,
+        scale: usize,
+        duration_secs: u32,
+        shared_audio_frame: Arc<Mutex<FieldAcousticFrame>>,
+    ) -> Result<Self, String> {
         let out_w = src_w * scale;
         let out_h = src_h * scale;
         let max_frames = (duration_secs.max(1) as usize) * 60;
+        let temp_video_path = format!("{output_path}.video_tmp.mp4");
+        let temp_wav_path = format!("{output_path}.audio_tmp.wav");
 
         let mut child = Command::new("ffmpeg")
             .args([
@@ -49,18 +65,25 @@ impl Mp4VideoRecorder {
                 "-pix_fmt",
                 "yuv420p",
                 "-preset",
-                "fast",
+                "medium",
                 "-crf",
-                "18",
-                &output_path,
+                "26",
+                "-maxrate",
+                "600k",
+                "-bufsize",
+                "1200k",
+                &temp_video_path,
             ])
             .stdin(Stdio::piped())
             .spawn()
             .map_err(|e| format!("Failed to spawn ffmpeg for MP4 recording: {e}"))?;
 
         let stdin = child.stdin.take();
+        let total_samples = max_frames * (FieldModalSynthesizer::DEFAULT_SAMPLE_RATE as usize / 60);
         Ok(Self {
             output_path,
+            temp_video_path,
+            temp_wav_path,
             child,
             stdin,
             scale,
@@ -69,6 +92,9 @@ impl Mp4VideoRecorder {
             upscaled_frame: vec![0u8; out_w * out_h * 4],
             frames_written: 0,
             max_frames,
+            synth: FieldModalSynthesizer::new(shared_audio_frame),
+            audio_left: Vec::with_capacity(total_samples),
+            audio_right: Vec::with_capacity(total_samples),
         })
     }
 
@@ -100,6 +126,15 @@ impl Mp4VideoRecorder {
         if let Some(stdin) = &mut self.stdin {
             let _ = stdin.write_all(&self.upscaled_frame);
         }
+
+        // Synthesize 800 stereo samples (48000 Hz / 60 FPS) from the live field audio frame
+        let samples_per_frame = (FieldModalSynthesizer::DEFAULT_SAMPLE_RATE as usize) / 60;
+        for _ in 0..samples_per_frame {
+            let (l, r) = self.synth.next_stereo_frame();
+            self.audio_left.push(l);
+            self.audio_right.push(r);
+        }
+
         self.frames_written += 1;
         self.frames_written >= self.max_frames
     }
@@ -109,8 +144,45 @@ impl Mp4VideoRecorder {
             let _ = stdin.flush();
         }
         let _ = self.child.wait();
+
+        let _ = write_stereo_wav(
+            &self.temp_wav_path,
+            FieldModalSynthesizer::DEFAULT_SAMPLE_RATE,
+            &self.audio_left,
+            &self.audio_right,
+        );
+
+        let mux_status = Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-loglevel",
+                "error",
+                "-i",
+                &self.temp_video_path,
+                "-i",
+                &self.temp_wav_path,
+                "-c:v",
+                "copy",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "96k",
+                "-movflags",
+                "+faststart",
+                "-shortest",
+                &self.output_path,
+            ])
+            .status();
+
+        if mux_status.map_or(false, |s| s.success()) {
+            let _ = std::fs::remove_file(&self.temp_video_path);
+        } else {
+            let _ = std::fs::rename(&self.temp_video_path, &self.output_path);
+        }
+        let _ = std::fs::remove_file(&self.temp_wav_path);
+
         println!(
-            "Saved MP4 recording to {} ({} frames, {:.1}s)",
+            "Saved MP4 recording with stereo field audio to {} ({} frames, {:.1}s)",
             self.output_path,
             self.frames_written,
             self.frames_written as f32 / 60.0
@@ -183,14 +255,18 @@ pub fn launch_gui() {
     let mut game = AsteroidsFieldGame::new(240, 150);
     game.autopilot_enabled = autopilot;
 
+    let shared_audio_for_rec = game.shared_audio_frame.clone();
     let recorder = record_cfg.and_then(|(path, secs)| {
+        let scale = 5usize; // 240x150 * 5 = 1200x750 (<= 1280px wide)
         println!(
-            "Recording Asteroids session to '{}' for {}s ({} frames @ 60 FPS)...",
+            "Recording Asteroids session to '{}' ({}x{} + 48kHz AAC audio) for {}s ({} frames @ 60 FPS)...",
             path,
+            game.width * scale,
+            game.height * scale,
             secs,
             secs * 60
         );
-        Mp4VideoRecorder::new(path, game.width, game.height, 6, secs)
+        Mp4VideoRecorder::new(path, game.width, game.height, scale, secs, shared_audio_for_rec)
             .map_err(|e| eprintln!("{e}"))
             .ok()
     });
@@ -225,7 +301,7 @@ fn setup_scene(
     game_res.game.render_to_pixel_buffer();
     let w = game_res.game.width as u32;
     let h = game_res.game.height as u32;
-    let shared_audio = if std::env::args().any(|a| a == "--mute") {
+    let shared_audio = if std::env::args().any(|a| a == "--mute") || game_res.recorder.is_some() {
         None
     } else {
         Some(game_res.game.shared_audio_frame.clone())

@@ -793,7 +793,7 @@ impl AsteroidsFieldGame {
             self.gravity.relax_poisson(&self.solver.material, 4, periodic);
         }
 
-        // 1. Integrate field forces (-grad p, -grad Q, -grad Phi_g) onto ship, asteroids, and aliens
+        // 1. Integrate field forces (-grad p, -grad Q, -grad Phi_g) onto ship and asteroids
         if self.wave_force_enabled {
             let sx = (self.ship_x.round() as isize).rem_euclid(self.width as isize) as usize;
             let sy = (self.ship_y.round() as isize).rem_euclid(self.height as isize) as usize;
@@ -808,38 +808,10 @@ impl AsteroidsFieldGame {
                 let (agx, agy) = self.gravity.acceleration_at(self.ship_x, self.ship_y, periodic);
                 self.ship_vx = (self.ship_vx + agx * 0.25).clamp(-0.85, 0.85);
                 self.ship_vy = (self.ship_vy + agy * 0.25).clamp(-0.85, 0.85);
-            }
-
-            // Zero-Readback GPU Force & Overpressure Reduction Pass
-            let mut queries = Vec::with_capacity(self.asteroids.len());
-            for rock in &self.asteroids {
-                queries.push(GpuBodyQuery {
-                    x: rock.x,
-                    y: rock.y,
-                    radius: rock.radius,
-                    yield_pressure: rock.material.yield_pressure,
-                });
-            }
-            let reductions = self
-                .gpu_accel
-                .sim
-                .reduce_bodies_gpu(&self.gpu_accel.ctx, &queries);
-            for (rock, red) in self.asteroids.iter_mut().zip(reductions.iter()) {
-                rock.vx = (rock.vx + red.fx / rock.mass).clamp(-0.65, 0.65);
-                rock.vy = (rock.vy + red.fy / rock.mass).clamp(-0.65, 0.65);
-                rock.omega = (rock.omega + red.tau_z / rock.inertia).clamp(-0.14, 0.14);
-                if red.max_pressure > rock.material.yield_pressure {
-                    let excess = red.max_pressure - rock.material.yield_pressure;
-                    for c in &mut rock.cohesion {
-                        if *c > 0.0 {
-                            *c = (*c - 0.12 * excess).max(0.0);
-                        }
-                    }
-                }
-                if self.topology == WorldTopologyMode::GravityWellArena {
-                    let (agx, agy) = self.gravity.acceleration_at(rock.x, rock.y, periodic);
-                    rock.vx = (rock.vx + agx * 0.20).clamp(-0.65, 0.65);
-                    rock.vy = (rock.vy + agy * 0.20).clamp(-0.65, 0.65);
+                for rock in &mut self.asteroids {
+                    let (rgx, rgy) = self.gravity.acceleration_at(rock.x, rock.y, periodic);
+                    rock.vx = (rock.vx + rgx * 0.20).clamp(-0.65, 0.65);
+                    rock.vy = (rock.vy + rgy * 0.20).clamp(-0.65, 0.65);
                 }
             }
         }
@@ -1418,18 +1390,53 @@ impl AsteroidsFieldGame {
         self.ship_vx *= 0.992;
         self.ship_vy *= 0.992;
 
-        // 4. Synchronize all rotating bodies into the lattice and advance WGPU FDTD substeps
+        // 4. Synchronize all rotating bodies into the lattice and execute unified WGPU FDTD + Force Reduction pass
         self.sync_all_bodies_to_lattice();
 
         let f_substeps = self.solver.config.substeps_per_macro;
-        let gpu = &self.gpu_accel;
-        gpu.sim.upload_state(&gpu.ctx, &self.solver.state);
-        gpu.sim.upload_material(&gpu.ctx, &self.solver.material);
-        gpu.sim.upload_boundary(&gpu.ctx, &self.solver.boundary);
-        gpu.sim.step(&gpu.ctx, f_substeps);
-        gpu.sim.readback_state_into(&gpu.ctx, &mut self.solver.state);
+        let queries: Vec<GpuBodyQuery> = if self.wave_force_enabled {
+            self.asteroids
+                .iter()
+                .map(|rock| GpuBodyQuery {
+                    x: rock.x,
+                    y: rock.y,
+                    radius: rock.radius,
+                    yield_pressure: rock.material.yield_pressure,
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        let reductions = {
+            let gpu = &self.gpu_accel;
+            gpu.sim.step_and_reduce_into(
+                &gpu.ctx,
+                f_substeps,
+                &mut self.solver.state,
+                &self.solver.material,
+                &self.solver.boundary,
+                &queries,
+            )
+        };
         self.solver.current_step += f_substeps;
         self.solver.current_time += self.solver.config.dt * f_substeps as f32;
+
+        if self.wave_force_enabled {
+            for (rock, red) in self.asteroids.iter_mut().zip(reductions.iter()) {
+                rock.vx = (rock.vx + red.fx / rock.mass).clamp(-0.65, 0.65);
+                rock.vy = (rock.vy + red.fy / rock.mass).clamp(-0.65, 0.65);
+                rock.omega = (rock.omega + red.tau_z / rock.inertia).clamp(-0.14, 0.14);
+                if red.max_pressure > rock.material.yield_pressure {
+                    let excess = red.max_pressure - rock.material.yield_pressure;
+                    for c in &mut rock.cohesion {
+                        if *c > 0.0 {
+                            *c = (*c - 0.12 * excess).max(0.0);
+                        }
+                    }
+                }
+            }
+        }
 
         // 5. Sympathetic Wave Cleaving (distant cavitation shockwaves cleaving already-cracked rocks)
         if self.wave_force_enabled && self.in_play {
@@ -1515,7 +1522,6 @@ impl AsteroidsFieldGame {
         let w = self.width;
         let h = self.height;
         let periodic = self.is_periodic();
-        let p_dims = self.periodic_dims();
 
         if self.pixel_buffer.len() != w * h * 4 {
             self.pixel_buffer.resize(w * h * 4, 0);
@@ -1612,6 +1618,9 @@ impl AsteroidsFieldGame {
             let r_bound = (rock.radius.ceil() as isize) + 1;
             let cx = rock.x.round() as isize;
             let cy = rock.y.round() as isize;
+            let cos_t = rock.theta.cos();
+            let sin_t = rock.theta.sin();
+            let center = (rock.local_size as f32 - 1.0) * 0.5;
 
             for oy in -r_bound..=r_bound {
                 for ox in -r_bound..=r_bound {
@@ -1623,7 +1632,10 @@ impl AsteroidsFieldGame {
                     let gx = px.rem_euclid(w as isize) as usize;
                     let gy = py.rem_euclid(h as isize) as usize;
 
-                    let (lx, ly) = rock.world_to_local(px as f32, py as f32, p_dims);
+                    let dx = px as f32 - rock.x;
+                    let dy = py as f32 - rock.y;
+                    let lx = dx * cos_t + dy * sin_t + center;
+                    let ly = -dx * sin_t + dy * cos_t + center;
                     let coh = rock.sample_local_cohesion(lx, ly);
                     if coh < 0.12 {
                         continue;

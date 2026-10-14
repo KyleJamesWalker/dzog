@@ -27,3 +27,6 @@ bevy = { version = "0.20", default-features = false, features = [
     "ui",
     "bevy_audio",
 ] }
+
+[profile.dev]
+opt-level = 2

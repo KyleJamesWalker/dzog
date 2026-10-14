@@ -131,6 +131,20 @@ Zero-Readback Body Force/Probe Reduction (reduce_body.wgsl)   Bevy Field Canvas 
 
 ---
 
+## Asteroids Autopilot & MP4 Video Recording
+
+You can launch `asteroids` with its player-like autopilot enabled (`[T]` in-game or `--autopilot` at startup) and record a 60 FPS MP4 video with synchronized 48 kHz stereo field audio (`<= 1280px` wide, GitHub README CDN ready):
+
+```bash
+# Launch with Autopilot enabled (toggle in-game anytime with [T])
+cargo run --release -p asteroids -- --autopilot
+
+# Record a 30-second Autopilot session (1200x750 H.264 + AAC stereo field audio) and exit automatically
+cargo run --release -p asteroids -- --autopilot --record asteroids_demo.mp4 --duration 30
+```
+
+---
+
 ## License
 
 Permissive **MIT Attribution License** — see [`LICENSE`](./LICENSE). Forks and redistributions must preserve original author credit (`J. Dunlap / jadbox`).

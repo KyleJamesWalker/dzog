@@ -88,7 +88,8 @@ pub struct GpuSimulation {
 
     pub bind_group_velocity: BindGroup,
     pub bind_group_pressure: BindGroup,
-    pub bind_group_luminescence: BindGroup,
+    pub bind_group_lum_a_to_b: BindGroup,
+    pub bind_group_lum_b_to_a: BindGroup,
     pub bind_group_impulse: BindGroup,
     pub bind_group_reduce: BindGroup,
 
@@ -98,6 +99,8 @@ pub struct GpuSimulation {
 
     pub staging_buffer: Buffer,
     pub lum_staging_buffer: Buffer,
+    pub scratch_upload_a: std::sync::Mutex<Vec<f32>>,
+    pub scratch_upload_b: std::sync::Mutex<Vec<f32>>,
 }
 
 impl GpuSimulation {
@@ -403,8 +406,8 @@ impl GpuSimulation {
             ],
         });
 
-        // Pass 3 BindGroup: Read State A + Material + Lum A -> Write Lum B
-        let bind_group_luminescence = ctx.device.create_bind_group(&BindGroupDescriptor {
+        // Pass 3 BindGroups: Ping-pong Lum A -> Lum B and Lum B -> Lum A
+        let bind_group_lum_a_to_b = ctx.device.create_bind_group(&BindGroupDescriptor {
             label: Some("Luminescence BindGroup (Lum A -> Lum B)"),
             layout: &bind_group_layout,
             entries: &[
@@ -413,6 +416,18 @@ impl GpuSimulation {
                 BindGroupEntry { binding: 2, resource: BindingResource::TextureView(&material_view) },
                 BindGroupEntry { binding: 3, resource: BindingResource::TextureView(&lum_view_a) },
                 BindGroupEntry { binding: 4, resource: BindingResource::TextureView(&lum_view_b) },
+            ],
+        });
+
+        let bind_group_lum_b_to_a = ctx.device.create_bind_group(&BindGroupDescriptor {
+            label: Some("Luminescence BindGroup (Lum B -> Lum A)"),
+            layout: &bind_group_layout,
+            entries: &[
+                BindGroupEntry { binding: 0, resource: params_buffer.as_entire_binding() },
+                BindGroupEntry { binding: 1, resource: BindingResource::TextureView(&view_a) },
+                BindGroupEntry { binding: 2, resource: BindingResource::TextureView(&material_view) },
+                BindGroupEntry { binding: 3, resource: BindingResource::TextureView(&lum_view_b) },
+                BindGroupEntry { binding: 4, resource: BindingResource::TextureView(&lum_view_a) },
             ],
         });
 
@@ -543,6 +558,7 @@ impl GpuSimulation {
             mapped_at_creation: false,
         });
 
+        let cell_floats = (w * h * 4) as usize;
         let sim = Self {
             width: w,
             height: h,
@@ -568,7 +584,8 @@ impl GpuSimulation {
             reduce_pipeline,
             bind_group_velocity,
             bind_group_pressure,
-            bind_group_luminescence,
+            bind_group_lum_a_to_b,
+            bind_group_lum_b_to_a,
             bind_group_impulse,
             bind_group_reduce,
             body_query_buffer,
@@ -576,6 +593,8 @@ impl GpuSimulation {
             body_reduction_staging,
             staging_buffer,
             lum_staging_buffer,
+            scratch_upload_a: std::sync::Mutex::new(vec![0.0f32; cell_floats]),
+            scratch_upload_b: std::sync::Mutex::new(vec![0.0f32; cell_floats]),
         };
 
         sim.upload_state(ctx, state);
@@ -585,22 +604,26 @@ impl GpuSimulation {
         Ok(sim)
     }
 
-    /// Upload CPU state to GPU Texture A and Luminescence Texture A.
+    /// Upload CPU state to GPU Texture A and Luminescence Texture A (reuses scratch buffers).
     pub fn upload_state(&self, ctx: &GpuContext, state: &AcousticState) {
         let count = state.config.cell_count();
         let has_lum = state.luminescence.len() == count;
-        let mut buffer = Vec::with_capacity(count * 4);
-        let mut lum_buf = Vec::with_capacity(count * 4);
+        let mut buffer = self.scratch_upload_a.lock().unwrap();
+        let mut lum_buf = self.scratch_upload_b.lock().unwrap();
+        if buffer.len() != count * 4 {
+            buffer.resize(count * 4, 0.0);
+        }
+        if lum_buf.len() != count * 4 {
+            lum_buf.resize(count * 4, 0.0);
+        }
         for i in 0..count {
-            buffer.push(state.pressure[i]);
-            buffer.push(state.vx[i]);
-            buffer.push(state.vy[i]);
-            buffer.push(0.0f32);
+            let base = i * 4;
+            buffer[base] = state.pressure[i];
+            buffer[base + 1] = state.vx[i];
+            buffer[base + 2] = state.vy[i];
+            buffer[base + 3] = 0.0f32;
 
-            lum_buf.push(if has_lum { state.luminescence[i] } else { 0.0f32 });
-            lum_buf.push(0.0f32);
-            lum_buf.push(0.0f32);
-            lum_buf.push(0.0f32);
+            lum_buf[base] = if has_lum { state.luminescence[i] } else { 0.0f32 };
         }
 
         let extent = Extent3d {
@@ -639,16 +662,20 @@ impl GpuSimulation {
         );
     }
 
-    /// Upload material parameters to GPU Material Texture.
+    /// Upload material parameters to GPU Material Texture (reuses scratch buffer).
     pub fn upload_material(&self, ctx: &GpuContext, material: &MaterialField) {
         let count = material.config.cell_count();
         let has_cohesion = material.cohesion.len() == count;
-        let mut buffer = Vec::with_capacity(count * 4);
+        let mut buffer = self.scratch_upload_a.lock().unwrap();
+        if buffer.len() != count * 4 {
+            buffer.resize(count * 4, 0.0);
+        }
         for i in 0..count {
-            buffer.push(material.density[i]);
-            buffer.push(material.bulk_modulus[i]);
-            buffer.push(material.damping[i]);
-            buffer.push(if has_cohesion { material.cohesion[i] } else { 0.0f32 });
+            let base = i * 4;
+            buffer[base] = material.density[i];
+            buffer[base + 1] = material.bulk_modulus[i];
+            buffer[base + 2] = material.damping[i];
+            buffer[base + 3] = if has_cohesion { material.cohesion[i] } else { 0.0f32 };
         }
 
         ctx.queue.write_texture(
@@ -737,19 +764,19 @@ impl GpuSimulation {
         ctx.queue.submit(std::iter::once(encoder.finish()));
     }
 
-    /// Upload boundary wall masks and velocities to GPU Boundary Texture.
+    /// Upload boundary wall masks and velocities to GPU Boundary Texture (reuses scratch buffer).
     pub fn upload_boundary(&self, ctx: &GpuContext, boundary: &BoundaryMask) {
         let count = boundary.config.cell_count();
-        let mut buffer = Vec::with_capacity(count * 4);
+        let mut buffer = self.scratch_upload_a.lock().unwrap();
+        if buffer.len() != count * 4 {
+            buffer.resize(count * 4, 0.0);
+        }
         for i in 0..count {
-            let we = if boundary.wall_east[i] { 1.0f32 } else { 0.0f32 };
-            let wvx = boundary.wall_vx[i];
-            let wn = if boundary.wall_north[i] { 1.0f32 } else { 0.0f32 };
-            let wvy = boundary.wall_vy[i];
-            buffer.push(we);
-            buffer.push(wvx);
-            buffer.push(wn);
-            buffer.push(wvy);
+            let base = i * 4;
+            buffer[base] = if boundary.wall_east[i] { 1.0f32 } else { 0.0f32 };
+            buffer[base + 1] = boundary.wall_vx[i];
+            buffer[base + 2] = if boundary.wall_north[i] { 1.0f32 } else { 0.0f32 };
+            buffer[base + 3] = boundary.wall_vy[i];
         }
 
         ctx.queue.write_texture(
@@ -773,49 +800,40 @@ impl GpuSimulation {
         );
     }
 
-    /// Dispatch one or more simulation substeps on the GPU.
-    pub fn step(&self, ctx: &GpuContext, substeps: usize) {
+    /// Encode `substeps` FDTD passes into an existing `CommandEncoder` inside a single compute pass.
+    pub fn encode_substeps(&self, encoder: &mut CommandEncoder, substeps: usize) {
         let workgroups_x = (self.width + 15) / 16;
         let workgroups_y = (self.height + 15) / 16;
 
-        let mut encoder = ctx.device.create_command_encoder(&CommandEncoderDescriptor {
-            label: Some("Simulation Compute Substeps Encoder"),
-        });
+        {
+            let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+                label: Some("Unified FDTD & Luminescence Pass"),
+                timestamp_writes: None,
+            });
 
-        for _ in 0..substeps {
-            // Pass 1: Velocity update (A -> B)
-            {
-                let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
-                    label: Some("Velocity Pass"),
-                    timestamp_writes: None,
-                });
+            for s in 0..substeps {
+                // Pass 1: Velocity update (A -> B)
                 pass.set_pipeline(&self.velocity_pipeline);
                 pass.set_bind_group(0, &self.bind_group_velocity, &[]);
                 pass.dispatch_workgroups(workgroups_x, workgroups_y, 1);
-            }
 
-            // Pass 2: Pressure update (B -> A)
-            {
-                let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
-                    label: Some("Pressure Pass"),
-                    timestamp_writes: None,
-                });
+                // Pass 2: Pressure update (B -> A)
                 pass.set_pipeline(&self.pressure_pipeline);
                 pass.set_bind_group(0, &self.bind_group_pressure, &[]);
                 pass.dispatch_workgroups(workgroups_x, workgroups_y, 1);
-            }
 
-            // Pass 3: Screened reaction-diffusion luminescence update (Lum A -> Lum B -> Lum A)
-            {
-                let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
-                    label: Some("Luminescence Pass"),
-                    timestamp_writes: None,
-                });
+                // Pass 3: Luminescence ping-pong
                 pass.set_pipeline(&self.luminescence_pipeline);
-                pass.set_bind_group(0, &self.bind_group_luminescence, &[]);
+                if s % 2 == 0 {
+                    pass.set_bind_group(0, &self.bind_group_lum_a_to_b, &[]);
+                } else {
+                    pass.set_bind_group(0, &self.bind_group_lum_b_to_a, &[]);
+                }
                 pass.dispatch_workgroups(workgroups_x, workgroups_y, 1);
             }
+        }
 
+        if substeps % 2 == 1 {
             encoder.copy_texture_to_texture(
                 TexelCopyTextureInfo {
                     texture: &self.lum_texture_b,
@@ -836,8 +854,185 @@ impl GpuSimulation {
                 },
             );
         }
+    }
+
+    /// Dispatch one or more simulation substeps on the GPU.
+    pub fn step(&self, ctx: &GpuContext, substeps: usize) {
+        let mut encoder = ctx.device.create_command_encoder(&CommandEncoderDescriptor {
+            label: Some("Simulation Compute Substeps Encoder"),
+        });
+        self.encode_substeps(&mut encoder, substeps);
+        ctx.queue.submit(std::iter::once(encoder.finish()));
+    }
+
+    /// Unified single-submit GPU macro-step: uploads state/material/boundary, executes `substeps` FDTD passes,
+    /// dispatches body force/overpressure reduction (`reduce_body.wgsl`), and reads back state + reductions
+    /// in a single `device.poll` barrier per frame.
+    pub fn step_and_reduce_into(
+        &self,
+        ctx: &GpuContext,
+        substeps: usize,
+        state: &mut AcousticState,
+        material: &MaterialField,
+        boundary: &BoundaryMask,
+        queries: &[GpuBodyQuery],
+    ) -> Vec<GpuBodyReduction> {
+        self.upload_state(ctx, state);
+        self.upload_material(ctx, material);
+        self.upload_boundary(ctx, boundary);
+
+        let q_count = queries.len().min(MAX_GPU_BODY_QUERIES);
+        if q_count > 0 {
+            let mut padded = [GpuBodyQuery {
+                x: 0.0,
+                y: 0.0,
+                radius: 0.0,
+                yield_pressure: 0.0,
+            }; MAX_GPU_BODY_QUERIES];
+            padded[..q_count].copy_from_slice(&queries[..q_count]);
+            ctx.queue
+                .write_buffer(&self.body_query_buffer, 0, bytemuck::bytes_of(&padded));
+        }
+
+        let bytes_per_row = (self.width * 16 + 255) & !255;
+        let extent = Extent3d {
+            width: self.width,
+            height: self.height,
+            depth_or_array_layers: 1,
+        };
+        let layout = TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(bytes_per_row),
+            rows_per_image: Some(self.height),
+        };
+
+        let mut encoder = ctx.device.create_command_encoder(&CommandEncoderDescriptor {
+            label: Some("Unified FDTD + Reduction + Readback Encoder"),
+        });
+
+        self.encode_substeps(&mut encoder, substeps);
+
+        if q_count > 0 {
+            let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+                label: Some("Body Force & Probe Reduction Pass"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.reduce_pipeline);
+            pass.set_bind_group(0, &self.bind_group_reduce, &[]);
+            pass.dispatch_workgroups(((q_count as u32) + 31) / 32, 1, 1);
+        }
+
+        encoder.copy_texture_to_buffer(
+            TexelCopyTextureInfo {
+                texture: &self.texture_a,
+                mip_level: 0,
+                origin: Origin3d::ZERO,
+                aspect: TextureAspect::All,
+            },
+            TexelCopyBufferInfo {
+                buffer: &self.staging_buffer,
+                layout,
+            },
+            extent,
+        );
+
+        encoder.copy_texture_to_buffer(
+            TexelCopyTextureInfo {
+                texture: &self.lum_texture_a,
+                mip_level: 0,
+                origin: Origin3d::ZERO,
+                aspect: TextureAspect::All,
+            },
+            TexelCopyBufferInfo {
+                buffer: &self.lum_staging_buffer,
+                layout,
+            },
+            extent,
+        );
+
+        let red_byte_len = (q_count * std::mem::size_of::<GpuBodyReduction>()) as u64;
+        if q_count > 0 {
+            encoder.copy_buffer_to_buffer(
+                &self.body_reduction_buffer,
+                0,
+                &self.body_reduction_staging,
+                0,
+                red_byte_len,
+            );
+        }
 
         ctx.queue.submit(std::iter::once(encoder.finish()));
+
+        let slice = self.staging_buffer.slice(..);
+        let lum_slice = self.lum_staging_buffer.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let tx2 = tx.clone();
+        let tx3 = tx.clone();
+        slice.map_async(MapMode::Read, move |res| {
+            tx.send(res).unwrap();
+        });
+        lum_slice.map_async(MapMode::Read, move |res| {
+            tx2.send(res).unwrap();
+        });
+        if q_count > 0 {
+            self.body_reduction_staging
+                .slice(0..red_byte_len)
+                .map_async(MapMode::Read, move |res| {
+                    tx3.send(res).unwrap();
+                });
+        }
+
+        let _ = ctx.device.poll(PollType::wait_indefinitely());
+        rx.recv().unwrap().unwrap();
+        rx.recv().unwrap().unwrap();
+        if q_count > 0 {
+            rx.recv().unwrap().unwrap();
+        }
+
+        let grid = state.config;
+        let count = grid.cell_count();
+        if state.luminescence.len() != count {
+            state.luminescence.resize(count, 0.0);
+        }
+
+        {
+            let view = slice.get_mapped_range().unwrap();
+            let lum_view = lum_slice.get_mapped_range().unwrap();
+            let row_bytes = (self.width * 16) as usize;
+            let pitch = bytes_per_row as usize;
+
+            for y in 0..self.height as usize {
+                let row_start = y * pitch;
+                let row_slice = &view[row_start..row_start + row_bytes];
+                let lum_row_slice = &lum_view[row_start..row_start + row_bytes];
+                let floats: &[f32] = bytemuck::cast_slice(row_slice);
+                let lum_floats: &[f32] = bytemuck::cast_slice(lum_row_slice);
+
+                for x in 0..self.width as usize {
+                    let idx = grid.index(x, y);
+                    let f_idx = x * 4;
+                    state.pressure[idx] = floats[f_idx];
+                    state.vx[idx] = floats[f_idx + 1];
+                    state.vy[idx] = floats[f_idx + 2];
+                    state.luminescence[idx] = lum_floats[f_idx];
+                }
+            }
+        }
+        self.staging_buffer.unmap();
+        self.lum_staging_buffer.unmap();
+
+        if q_count > 0 {
+            let red_slice = self.body_reduction_staging.slice(0..red_byte_len);
+            let out = {
+                let view = red_slice.get_mapped_range().unwrap();
+                let items: &[GpuBodyReduction] = bytemuck::cast_slice(&view);
+                items.to_vec()
+            };
+            self.body_reduction_staging.unmap();
+            out
+        } else {
+            Vec::new()
+        }
     }
 
     /// Read back simulation state from GPU Texture A & Luminescence Texture A into an existing `AcousticState`.

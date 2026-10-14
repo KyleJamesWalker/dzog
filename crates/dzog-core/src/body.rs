@@ -479,7 +479,9 @@ impl CohesiveBody {
         let r_bound = (self.radius.ceil() as isize) + 1;
         let cx = self.x.round() as isize;
         let cy = self.y.round() as isize;
-        let periodic_dims = if periodic { Some((w as f32, h as f32)) } else { None };
+        let cos_t = self.theta.cos();
+        let sin_t = self.theta.sin();
+        let center = (self.local_size as f32 - 1.0) * 0.5;
 
         for oy in -r_bound..=r_bound {
             for ox in -r_bound..=r_bound {
@@ -491,7 +493,10 @@ impl CohesiveBody {
                 let gx = px.rem_euclid(w) as usize;
                 let gy = py.rem_euclid(h) as usize;
 
-                let (lx, ly) = self.world_to_local(px as f32, py as f32, periodic_dims);
+                let dx = px as f32 - self.x;
+                let dy = py as f32 - self.y;
+                let lx = dx * cos_t + dy * sin_t + center;
+                let ly = -dx * sin_t + dy * cos_t + center;
                 let coh = self.sample_local_cohesion(lx, ly);
                 if coh < 0.15 {
                     continue;
