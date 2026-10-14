@@ -71,7 +71,7 @@ For deterministic offline analysis and test verification (`crates/dzog-core/test
 
 ---
 
-## 4. Bevy 0.15 Integration (`asteroids/src/gui.rs`, `pong/src/gui.rs`)
+## 4. Bevy Integration (`asteroids/src/gui.rs`, `pong/src/gui.rs`)
 
 Both GUI crates wrap `FieldModalSynthesizer` in a Bevy `Decodable` asset:
 

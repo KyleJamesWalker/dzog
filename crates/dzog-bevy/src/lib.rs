@@ -1,4 +1,4 @@
-//! Bevy 0.20 integration plugin for the Dzog field-physics & rendering engine.
+//! Bevy integration plugin for the Dzog field-physics & rendering engine.
 //!
 //! Provides shared Bevy rendering, WGPU compute acceleration, perceptual view modes,
 //! and native `bevy_audio` (`Decodable` / `AudioPlayer`) synthesis so games (`asteroids`, `pong`)

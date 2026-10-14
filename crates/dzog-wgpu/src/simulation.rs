@@ -285,8 +285,8 @@ impl GpuSimulation {
 
         let pipeline_layout = ctx.device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("Acoustic Compute Pipeline Layout"),
-            bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&bind_group_layout)],
+            immediate_size: 0,
         });
 
         let velocity_pipeline = ctx.device.create_compute_pipeline(&ComputePipelineDescriptor {
@@ -364,8 +364,8 @@ impl GpuSimulation {
 
         let impulse_pipeline_layout = ctx.device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("Impulse Compute Pipeline Layout"),
-            bind_group_layouts: &[&impulse_bind_group_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&impulse_bind_group_layout)],
+            immediate_size: 0,
         });
 
         let impulse_pipeline = ctx.device.create_compute_pipeline(&ComputePipelineDescriptor {
@@ -504,8 +504,8 @@ impl GpuSimulation {
 
         let reduce_pipeline_layout = ctx.device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("Body Reduction Pipeline Layout"),
-            bind_group_layouts: &[&reduce_bind_group_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&reduce_bind_group_layout)],
+            immediate_size: 0,
         });
 
         let reduce_pipeline = ctx.device.create_compute_pipeline(&ComputePipelineDescriptor {
@@ -899,7 +899,7 @@ impl GpuSimulation {
             tx2.send(result).unwrap();
         });
 
-        ctx.device.poll(Maintain::Wait);
+        let _ = ctx.device.poll(PollType::wait_indefinitely());
         rx.recv().unwrap().unwrap();
         rx.recv().unwrap().unwrap();
 
@@ -910,8 +910,8 @@ impl GpuSimulation {
         }
 
         {
-            let view = slice.get_mapped_range();
-            let lum_view = lum_slice.get_mapped_range();
+            let view = slice.get_mapped_range().unwrap();
+            let lum_view = lum_slice.get_mapped_range().unwrap();
             let row_bytes = (self.width * 16) as usize;
             let pitch = bytes_per_row as usize;
 
@@ -1017,11 +1017,11 @@ impl GpuSimulation {
         slice.map_async(MapMode::Read, move |res| {
             tx.send(res).unwrap();
         });
-        ctx.device.poll(Maintain::Wait);
+        let _ = ctx.device.poll(PollType::wait_indefinitely());
         rx.recv().unwrap().unwrap();
 
         let out = {
-            let view = slice.get_mapped_range();
+            let view = slice.get_mapped_range().unwrap();
             let items: &[GpuBodyReduction] = bytemuck::cast_slice(&view);
             items.to_vec()
         };

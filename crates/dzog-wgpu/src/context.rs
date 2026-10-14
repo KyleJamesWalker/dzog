@@ -33,30 +33,21 @@ impl GpuContext {
     }
 
     async fn init_headless_fresh() -> Result<Self, String> {
-        let instance = Instance::new(&InstanceDescriptor {
-            backends: Backends::all(),
-            ..Default::default()
-        });
+        let instance = Instance::default();
 
         let adapter = instance
             .request_adapter(&RequestAdapterOptions {
                 power_preference: PowerPreference::HighPerformance,
-                compatible_surface: None,
-                force_fallback_adapter: false,
+                ..Default::default()
             })
             .await
-            .ok_or_else(|| "Failed to find suitable WGPU GPU adapter".to_string())?;
+            .map_err(|e| format!("Failed to find suitable WGPU GPU adapter: {e}"))?;
 
         let (device, queue) = adapter
-            .request_device(
-                &DeviceDescriptor {
-                    label: Some("Dzog Headless Device"),
-                    required_features: Features::empty(),
-                    required_limits: Limits::default(),
-                    memory_hints: MemoryHints::default(),
-                },
-                None,
-            )
+            .request_device(&DeviceDescriptor {
+                label: Some("Dzog Headless Device"),
+                ..Default::default()
+            })
             .await
             .map_err(|e| format!("Failed to request WGPU device: {e}"))?;
 

@@ -19,7 +19,7 @@ In Dzog Simulator, a scene is an **executable physical situation**: a lattice wh
 # Run the full verification suite (33 analytical, GPU/CPU agreement, and physics tests)
 cargo test --workspace
 
-# Launch the Crystalline Asteroids & Alien Ecology demo (Bevy 0.15 + WGPU + Live Audio)
+# Launch the Crystalline Asteroids & Alien Ecology demo (Bevy + WGPU + Live Audio)
 cargo run -p asteroids
 
 # Launch Asteroids in Autopilot mode or record an MP4 demo session
@@ -83,7 +83,7 @@ Running continuum PDEs at $60\text{–}120\text{ Hz}$ inside an interactive game
 | --- | --- |
 | [`crates/dzog-core`](./crates/dzog-core) | Reference Yee-staggered FDTD solver, soliton law, Bohmian potential $Q$, exciton luminescence field $L(\mathbf{x}, t)$, `SolitonCarrierPulse` phase-locking, Poisson gravity $\Phi_g$, rotating `CohesiveBody` 3D facet rasterizer & BFS topological cleaving, thruster plumes, antiphase shields, $48\text{ kHz}$ modal audio synthesizer (`FieldModalSynthesizer`), and RON `FieldSpec` / `Checkpoint` serialization. |
 | [`crates/dzog-wgpu`](./crates/dzog-wgpu) | Hardware WGPU compute pipeline (`velocity.wgsl`, `pressure.wgsl`, `luminescence.wgsl`, `impulse.wgsl`, `reduce_body.wgsl`) over ping-pong `RGBA32Float` state & luminescence textures, toroidal periodic wrapping, zero-readback GPU body force/torque/probe reduction (`128` bodies), and verified CPU/GPU agreement ($< 10^{-4}$). |
-| [`crates/dzog-bevy`](./crates/dzog-bevy) | Bevy 0.15 engine plugin (`DzogBevyPlugin`): nearest-neighbor field canvas presentation (`FieldImageHandle`), shared perceptual view modes (`FieldViewMode`), mandatory hardware WGPU compute accelerator (`GpuFieldAccelerator`), and native `bevy_audio` (`Decodable` / `DzogFieldAudioSource`) streaming. |
+| [`crates/dzog-bevy`](./crates/dzog-bevy) | Bevy engine plugin (`DzogBevyPlugin`): nearest-neighbor field canvas presentation (`FieldImageHandle`), shared perceptual view modes (`FieldViewMode`), mandatory hardware WGPU compute accelerator (`GpuFieldAccelerator`), and native `bevy_audio` (`Decodable` / `DzogFieldAudioSource`) streaming. |
 | [`asteroids`](./asteroids) | **Field-First Crystalline Asteroids & Alien Ecology** (`240×150` lattice, `1600×1000` window): Multi-tier 3D-faceted mineralogical asteroids (`PiezoQuartz`, `ObsidianAnvil`, `BismuthCrystal`), dynamic field-lit crystal facets ($\nabla L, \nabla p$), continuous soliton laser glow, tactical piezo chain-cleaving, `BohmianSaucer` corvette & `HarmonicWeaver` cruiser craft, autopilot (`[T]` / `--autopilot`), and MP4 session recording (`--record`). |
 | [`pong`](./pong) | **Solid-State & Quantum-Vacuum Breakout**: Crystalline phonon coupling, point-of-impact cleavage planes, sympathetic crystal domino cascades, Paddle Doppler Overcharge, coherent Phase-Pulse wave-casting, and counterfactual checkpoint branching. |
 

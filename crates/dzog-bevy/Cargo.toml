@@ -3,7 +3,7 @@ name = "dzog-bevy"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "Bevy 0.15 rendering, WGPU compute acceleration, and procedural field-audio plugin for Dzog"
+description = "Bevy rendering, WGPU compute acceleration, and procedural field-audio plugin for Dzog"
 
 [dependencies]
 dzog-core = { path = "../dzog-core" }

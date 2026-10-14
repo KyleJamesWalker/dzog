@@ -1,9 +1,8 @@
-//! Bevy 0.15 GUI & `dzog_bevy` integration for Field-First Crystalline Asteroids & Alien Ecology.
+//! Bevy GUI & `dzog_bevy` integration for Field-First Crystalline Asteroids & Alien Ecology.
 
 use std::io::Write;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use bevy::{
-    app::AppExit,
     audio::{AudioSink, AudioSinkPlayback},
     prelude::*,
 };
@@ -200,7 +199,7 @@ pub fn launch_gui() {
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "Dzog — Field-First Crystalline Asteroids & Alien Ecology".into(),
-                resolution: (1600.0_f32, 1000.0_f32).into(),
+                resolution: (1600_u32, 1000_u32).into(),
                 ..default()
             }),
             ..default()
@@ -261,7 +260,7 @@ fn setup_scene(
             parent.spawn((
                 Text::new("ASTEROIDS"),
                 TextFont {
-                    font_size: 18.0,
+                    font_size: FontSize::Px(18.0),
                     ..default()
                 },
                 TextColor(Color::srgb(0.45, 0.95, 1.0)),
@@ -270,7 +269,7 @@ fn setup_scene(
             parent.spawn((
                 Text::new(""),
                 TextFont {
-                    font_size: 13.5,
+                    font_size: FontSize::Px(13.5),
                     ..default()
                 },
                 TextColor(Color::srgb(0.75, 0.84, 0.94)),
@@ -301,8 +300,8 @@ fn handle_input(
         game_res.game.autopilot_enabled = !game_res.game.autopilot_enabled;
     }
     if keys.just_pressed(KeyCode::KeyN) {
-        if let Ok(sink) = audio_sinks.get_single() {
-            sink.toggle();
+        if let Ok(sink) = audio_sinks.single() {
+            sink.toggle_playback();
         }
     }
     if keys.just_pressed(KeyCode::KeyB) {
@@ -355,15 +354,16 @@ fn step_simulation(
     mut game_res: ResMut<AsteroidsStateResource>,
     image_handle: Res<FieldImageHandle>,
     mut images: ResMut<Assets<Image>>,
-    mut app_exit: EventWriter<AppExit>,
 ) {
     if !game_res.paused {
         game_res.game.step();
     }
     game_res.game.render_to_pixel_buffer();
 
-    if let Some(image) = images.get_mut(&image_handle.0) {
-        image.data.copy_from_slice(&game_res.game.pixel_buffer);
+    if let Some(mut image) = images.get_mut(&image_handle.0) {
+        if let Some(data) = &mut image.data {
+            data.copy_from_slice(&game_res.game.pixel_buffer);
+        }
     }
 
     let AsteroidsStateResource {
@@ -376,7 +376,7 @@ fn step_simulation(
         if rec.write_frame(&game.pixel_buffer) {
             rec.finish();
             *recorder = None;
-            app_exit.send(AppExit::Success);
+            std::process::exit(0);
         }
     }
 }
@@ -390,7 +390,7 @@ fn update_ui(
     let g = &game_res.game;
     let ap_status = if g.autopilot_enabled { "ON" } else { "OFF" };
 
-    if let Ok(mut top) = top_q.get_single_mut() {
+    if let Ok(mut top) = top_q.single_mut() {
         **top = format!(
             "WAVE {} | SCORE {:05} | LIVES {} | CAPACITOR {:3.0}% | ROCKS {} | ALIENS {} | CLEAVES {} | PARRIES {}",
             g.wave_number,
@@ -404,8 +404,8 @@ fn update_ui(
         );
     }
 
-    if let Ok(mut bot) = bot_q.get_single_mut() {
-        let audio_status = match audio_sinks.get_single() {
+    if let Ok(mut bot) = bot_q.single_mut() {
+        let audio_status = match audio_sinks.single() {
             Ok(sink) if !sink.is_paused() => "ON",
             _ => "MUTE",
         };

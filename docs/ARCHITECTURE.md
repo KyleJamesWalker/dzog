@@ -1,6 +1,6 @@
 # Dzog Runtime Engine: Field-First Architecture & Bevy GUI
 
-This document details the field-first architecture of the **Dzog** runtime engine, adherence to its philosophical principles ([`philosophy.md`](../philosophy.md)), the **Nonlinear Solitary Wave Mechanics** replacing classical rigid bodies, and the **Bevy 0.15 GUI & Pixel Presentation** in [`/pong`](../pong/).
+This document details the field-first architecture of the **Dzog** runtime engine, adherence to its philosophical principles ([`philosophy.md`](../philosophy.md)), the **Nonlinear Solitary Wave Mechanics** replacing classical rigid bodies, and the **Bevy GUI & Pixel Presentation** in [`/pong`](../pong/) and [`/asteroids`](../asteroids/).
 
 ---
 
@@ -47,7 +47,7 @@ In [`pong/src/field_game.rs`](../pong/src/field_game.rs):
 
 ---
 
-## 3. Pixel Presentation & Bevy 0.15 GUI
+## 3. Pixel Presentation & Bevy GUI
 
 Instead of terminal ASCII, the engine renders directly to **pixels and shaders**:
 
@@ -55,7 +55,7 @@ Instead of terminal ASCII, the engine renders directly to **pixels and shaders**
   [`SolitonFieldGame::render_to_pixel_buffer()`](../pong/src/field_game.rs#L180) rasterizes field pressure, kinetic velocity glow, and boundary walls directly into an RGBA8 retro canvas.
 - **Retro Aesthetic**:
   Phosphor cyan paddles, golden amber soliton core, electric blue wavefronts, and CRT dark background.
-- **Bevy 0.15 Windowing & Mandatory WGPU Compute**:
+- **Bevy Windowing & Mandatory WGPU Compute**:
   [`crates/dzog-bevy/src/lib.rs`](../crates/dzog-bevy/src/lib.rs) and [`crates/dzog-wgpu`](../crates/dzog-wgpu) require a WGPU-capable GPU (`GpuContext::shared()`), executing all FDTD substeps (`velocity.wgsl`, `pressure.wgsl`, `luminescence.wgsl`) and body force reductions (`reduce_body.wgsl`) on the GPU.
 - **Asteroids Tech Demo (`asteroids/`)**:
   Runs on a `240×150` periodic/gravity-well lattice in a `1600×1000` window with 3D-faceted mineralogical asteroids (`PiezoQuartz`, `ObsidianAnvil`, `BismuthCrystal`), continuous `SolitonCarrierPulse` laser luminescence, ship-like `BohmianSaucer` corvettes & `HarmonicWeaver` cruisers, player-like autopilot (`asteroids/src/autopilot.rs`, `[T]` / `--autopilot`), and `ffmpeg` MP4 recording (`--record [file.mp4] --duration <secs>`).

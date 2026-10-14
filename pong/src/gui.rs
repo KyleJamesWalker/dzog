@@ -1,4 +1,4 @@
-//! Bevy 0.15 GUI & `dzog_bevy` integration for Field-First Solid-State Breakout.
+//! Bevy GUI & `dzog_bevy` integration for Field-First Solid-State Breakout.
 
 use bevy::{
     prelude::*,
@@ -28,7 +28,7 @@ pub fn launch_gui() {
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "Dzog — Solid-State & Quantum-Vacuum Breakout".into(),
-                resolution: (1024.0_f32, 640.0_f32).into(),
+                resolution: (1024_u32, 640_u32).into(),
                 ..default()
             }),
             ..default()
@@ -86,14 +86,14 @@ fn setup_scene(
         .with_children(|parent| {
             parent.spawn((
                 Text::new("SCORE: 00000  |  LIVES: 3  |  BRICKS: 32/32  |  CLEAVES: 0  |  PHASE: 50%"),
-                TextFont { font_size: 18.0, ..default() },
+                TextFont { font_size: FontSize::Px(18.0), ..default() },
                 TextColor(Color::srgb(0.92, 0.96, 1.0)),
                 ScoreText,
             ));
 
             parent.spawn((
                 Text::new("[A/D] Move | [W] Phase Pulse | [T] Sonic Blast & Force: ON | [V] View | [B/U] Branch/Restore"),
-                TextFont { font_size: 12.5, ..default() },
+                TextFont { font_size: FontSize::Px(12.5), ..default() },
                 TextColor(Color::srgb(0.55, 0.82, 0.96)),
                 StatusText,
             ));
@@ -152,7 +152,7 @@ fn handle_input(
     }
 
     if mouse_buttons.just_pressed(MouseButton::Left) || mouse_buttons.pressed(MouseButton::Right) {
-        if let Ok(window) = windows.get_single() {
+        if let Ok(window) = windows.single() {
             if let Some(cursor) = window.cursor_position() {
                 let win_w = window.width();
                 let win_h = window.height();
@@ -184,8 +184,10 @@ fn step_simulation(
 
     game_res.game.render_to_pixel_buffer();
 
-    if let Some(image) = images.get_mut(&field_handle.0) {
-        image.data.copy_from_slice(&game_res.game.pixel_buffer);
+    if let Some(mut image) = images.get_mut(&field_handle.0) {
+        if let Some(data) = &mut image.data {
+            data.copy_from_slice(&game_res.game.pixel_buffer);
+        }
     }
 }
 
