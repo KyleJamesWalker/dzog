@@ -21,7 +21,7 @@ https://github.com/user-attachments/assets/63759ad7-6401-47e1-8674-87e3e15a4092
 > **Live Web Demo:** [**Play in Browser (`jadbox.github.io/dzog/shmup/`)**](https://jadbox.github.io/dzog/shmup/)  
 > Expands the ecology into a scrolling metamaterial canyon: a situated **Tri-Lobe Crystalline Ship** (where wing lobes physically sever and re-crystallize instead of using integer hitpoints), **Chladni Pilot-Wave Swarms** surfing $-\nabla Q$ standing-wave pockets, and contested **Annealing Power Cubes** ($\Delta C > 0$).
 
-https://github.com/user-attachments/assets/718eeba3-4bc6-4f00-a8dc-97c151ca4618
+https://github.com/user-attachments/assets/d11876b8-0870-47fe-8872-23fe1d393944
 
 ---
 
