@@ -75,6 +75,58 @@ pub struct AlienVessel {
     pub cleave_count: u8,
 }
 
+impl AlienVessel {
+    /// Maximum number of wing/nacelle severing events this vessel class can survive before
+    /// further topological cleavage shatters the main hull.
+    #[inline]
+    pub fn max_survivable_cleaves(&self) -> u8 {
+        match self.role {
+            AlienRole::SectorDreadnought => 2,
+            AlienRole::ChladniMatriarch | AlienRole::TwinGunship => 1,
+            _ => 0,
+        }
+    }
+
+    /// Dynamic field-derived assessment of whether the vessel's lattice has suffered
+    /// catastrophic structural failure (through-cleavage, severed load-bearing connectivity,
+    /// or cavitated reactor core) and must enter the killed state.
+    pub fn is_critically_broken(&self, cleaved: bool, children_len: usize) -> bool {
+        let integrity = self.hull.structural_integrity();
+        let connected = self.hull.largest_intact_component_ratio();
+        let core_coh = self.hull.core_cohesion();
+        let active = self.hull.active_cell_count();
+        let max_cleaves = self.max_survivable_cleaves();
+
+        // Any topological split beyond allowed wing/pod cleaves, or loss of minimum hull cells
+        if (children_len >= 2 && self.cleave_count >= max_cleaves) || active < 10 {
+            return true;
+        }
+
+        if max_cleaves == 0 {
+            // Small vessels (Drones, Hunters): cannot survive through-cleavage or core fracture
+            cleaved || connected < 0.62 || integrity < 0.65 || core_coh < 0.50
+        } else {
+            // Medium & large vessels: survive peripheral wing cleaves, die when the fuselage
+            // is split by a wide fracture seam (`connected < 0.48`), loses structural integrity,
+            // or suffers reactor core cavitation (`core_coh < 0.42`).
+            (cleaved && (self.cleave_count >= max_cleaves || core_coh < 0.55 || integrity < 0.58))
+                || connected < 0.48
+                || integrity < 0.46
+                || core_coh < 0.42
+        }
+    }
+
+    /// Dynamic check for whether weapons are offline due to reactor core fracture,
+    /// low structural integrity, or severed weapon pods.
+    pub fn weapons_disabled(&self) -> bool {
+        let max_cleaves = self.max_survivable_cleaves();
+        (max_cleaves > 0 && self.cleave_count >= max_cleaves)
+            || self.hull.core_cohesion() < 0.62
+            || self.hull.structural_integrity() < 0.62
+            || self.hull.largest_intact_component_ratio() < 0.58
+    }
+}
+
 /// Destructible ground-layer structure or surface vessel (`Raptor: Call of the Shadows` inspiration).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GroundTargetKind {
@@ -99,6 +151,25 @@ pub struct GroundTarget {
     pub fracture_hits: u16,
     /// Shared waveguide pipeline group ID; detonating a dome surges all targets in the group.
     pub pipeline_group: u8,
+}
+
+impl GroundTarget {
+    /// Dynamic field-derived check for whether a ground target or patrol boat has suffered
+    /// catastrophic structural collapse.
+    pub fn is_critically_broken(&self, cleaved: bool, children_len: usize) -> bool {
+        children_len >= 2
+            || (cleaved && self.fracture_hits >= 2)
+            || self.hull.largest_intact_component_ratio() < 0.52
+            || self.hull.structural_integrity() < 0.50
+            || self.hull.core_cohesion() < 0.45
+    }
+
+    /// Whether a ground turret or patrol boat's weapons are offline due to heavy structural fracture.
+    pub fn weapons_disabled(&self) -> bool {
+        self.hull.core_cohesion() < 0.62
+            || self.hull.structural_integrity() < 0.62
+            || self.hull.largest_intact_component_ratio() < 0.58
+    }
 }
 
 /// Persistent blast crater stamped into the scrolling terrain after a ground target detonates.

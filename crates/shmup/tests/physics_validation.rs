@@ -274,4 +274,50 @@ fn test_progressive_enemy_fracturing_and_ground_waveguide_chain_detonation() {
         d_before,
         d_after
     );
+
+    // 5. Verify severely fractured enemy vessels with large cracks cutting through them
+    //    have their weapons disabled and transition cleanly into the destroyed state
+    let mut broken_gunship = entities::AlienVessel {
+        role: AlienRole::TwinGunship,
+        hull: dzog_core::CohesiveBody::new_twin_gunship(999, 120.0, 48.0, 6.8),
+        fire_cooldown: 0,
+        carrier_phase: 0.0,
+        cubes_healed: 0,
+        fracture_hits: 0,
+        cleave_count: 0,
+    };
+    assert!(
+        !broken_gunship.weapons_disabled() && !broken_gunship.is_critically_broken(false, 0),
+        "Intact TwinGunship should be combat-operational"
+    );
+
+    // Carve a deep through-fracture across the central fuselage
+    broken_gunship
+        .hull
+        .inflict_progressive_fracture(120.0, 48.0, 0.0, -1.0, 2.25, None);
+    broken_gunship.fracture_hits = 2;
+    let split_parts = broken_gunship
+        .hull
+        .split_connected_components(&mut game.next_body_id, None);
+    assert!(
+        broken_gunship.weapons_disabled(),
+        "Severely fractured enemy ship must have its weapons disabled"
+    );
+    assert!(
+        broken_gunship.is_critically_broken(true, split_parts.len()),
+        "Enemy ship with a large fracture cutting through its fuselage must enter the killed state"
+    );
+
+    game.aliens.clear();
+    game.bolts.clear();
+    game.aliens.push(broken_gunship);
+    game.step();
+    assert!(
+        game.aliens.is_empty(),
+        "Critically broken enemy ship must be removed in the combat sweep rather than remaining alive"
+    );
+    assert!(
+        game.bolts.iter().all(|b| b.from_player),
+        "Critically broken enemy ship must never fire projectiles"
+    );
 }

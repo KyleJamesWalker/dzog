@@ -641,6 +641,98 @@ impl CohesiveBody {
         if cnt == 0 { 0.0 } else { sum / cnt as f32 }
     }
 
+    /// Fraction of originally occupied hull cells that remain structurally intact (`C >= 0.45`).
+    pub fn structural_integrity(&self) -> f32 {
+        let mut intact = 0usize;
+        let mut total = 0usize;
+        for (&occ, &c) in self.occupied.iter().zip(self.cohesion.iter()) {
+            if occ {
+                total += 1;
+                if c >= 0.45 {
+                    intact += 1;
+                }
+            }
+        }
+        if total == 0 {
+            0.0
+        } else {
+            intact as f32 / total as f32
+        }
+    }
+
+    /// Mean structural cohesion within the central reactor/cockpit core (`r <= 0.38 * local_size * 0.5`).
+    pub fn core_cohesion(&self) -> f32 {
+        let center = (self.local_size as f32 - 1.0) * 0.5;
+        let core_r2 = (self.local_size as f32 * 0.20).max(1.8).powi(2);
+        let mut sum = 0.0f32;
+        let mut cnt = 0usize;
+        for ly in 0..self.local_size {
+            for lx in 0..self.local_size {
+                let idx = ly * self.local_size + lx;
+                if self.occupied[idx] {
+                    let d2 = (lx as f32 - center).powi(2) + (ly as f32 - center).powi(2);
+                    if d2 <= core_r2 {
+                        sum += self.cohesion[idx].clamp(0.0, 1.0);
+                        cnt += 1;
+                    }
+                }
+            }
+        }
+        if cnt == 0 {
+            self.mean_cohesion()
+        } else {
+            sum / cnt as f32
+        }
+    }
+
+    /// Size (in cells) of the largest 4-connected structurally load-bearing component (`C >= 0.25`),
+    /// along with the total number of originally occupied cells.
+    pub fn largest_intact_component_ratio(&self) -> f32 {
+        let n = self.local_size;
+        let count = n * n;
+        let total_occ = self.occupied.iter().filter(|&&o| o).count();
+        if total_occ == 0 {
+            return 0.0;
+        }
+        let mut visited = vec![false; count];
+        let mut max_comp = 0usize;
+        let mut queue = VecDeque::new();
+
+        for sy in 0..n {
+            for sx in 0..n {
+                let s_idx = sy * n + sx;
+                if visited[s_idx] || !self.occupied[s_idx] || self.cohesion[s_idx] < 0.25 {
+                    continue;
+                }
+                let mut comp_len = 0usize;
+                visited[s_idx] = true;
+                queue.push_back((sx, sy));
+                while let Some((cx, cy)) = queue.pop_front() {
+                    comp_len += 1;
+                    let neighbors = [
+                        (cx.wrapping_sub(1), cy),
+                        (cx + 1, cy),
+                        (cx, cy.wrapping_sub(1)),
+                        (cx, cy + 1),
+                    ];
+                    for (nx, ny) in neighbors {
+                        if nx < n && ny < n {
+                            let n_idx = ny * n + nx;
+                            if !visited[n_idx] && self.occupied[n_idx] && self.cohesion[n_idx] >= 0.25 {
+                                visited[n_idx] = true;
+                                queue.push_back((nx, ny));
+                            }
+                        }
+                    }
+                }
+                if comp_len > max_comp {
+                    max_comp = comp_len;
+                }
+            }
+        }
+        max_comp as f32 / total_occ as f32
+    }
+
     /// Recompute mass `M`, rotational moment of inertia `I_z`, and bounding `radius` from active cells.
     pub fn recompute_mass_properties(&mut self) {
         let center = (self.local_size as f32 - 1.0) * 0.5;
@@ -1163,7 +1255,7 @@ impl CohesiveBody {
             ],
             2 => &[
                 (0.0, 0.08, 0.85),
-                (std::f32::consts::PI, 0.16, 0.65),
+                (std::f32::consts::PI, 0.08, 0.65),
                 (0.55, 0.22, 0.60),
                 (-0.55, 0.22, 0.60),
             ],
@@ -1186,7 +1278,7 @@ impl CohesiveBody {
             let widths: &[f32] = if full_cleave && target_coh == 0.0 {
                 &[-0.55, 0.0, 0.55]
             } else if stage >= 2 {
-                &[-0.35, 0.35]
+                &[-0.35, 0.0, 0.35]
             } else {
                 &[0.0]
             };

@@ -262,6 +262,54 @@ impl ShmupFieldGame {
         }
     }
 
+    /// Detonate and destroy an alien vessel, spawning fiery field explosions and Annealing Power Cubes.
+    pub(crate) fn destroy_alien(
+        &mut self,
+        a_idx: usize,
+        had_topological_cleave: bool,
+        event: &mut ShmupEvent,
+    ) {
+        if a_idx >= self.aliens.len() {
+            return;
+        }
+        let dead = self.aliens.swap_remove(a_idx);
+        if had_topological_cleave {
+            self.topological_cleaves += 1;
+        }
+        let bounty = match dead.role {
+            AlienRole::SectorDreadnought => 2000,
+            AlienRole::ChladniMatriarch => 850,
+            AlienRole::TwinGunship => 700,
+            _ => 350,
+        };
+        self.score += bounty;
+        self.credits += bounty;
+        self.inject_fiery_field_explosion(
+            dead.hull.x,
+            dead.hull.y,
+            dead.hull.radius * 0.85,
+            3.6,
+        );
+        let cubes_n = match dead.role {
+            AlienRole::SectorDreadnought => 4,
+            AlienRole::ChladniMatriarch | AlienRole::TwinGunship => 2,
+            _ => 1,
+        };
+        for k in 0..cubes_n {
+            let off = (k as f32 - 0.5) * 2.2;
+            self.spawn_power_cube(
+                dead.hull.x + off,
+                dead.hull.y.max(2.0),
+                off * 0.08,
+                self.scroll_speed * 0.9,
+            );
+        }
+        *event = ShmupEvent::AlienDestroyed {
+            role: dead.role,
+            cubes_spawned: cubes_n,
+        };
+    }
+
     /// Advance bolts & missiles, resolve impacts, and process flying wreckage-to-enemy collisions.
     pub(crate) fn step_bolts_and_impacts(&mut self, dt_sub: f32, event: &mut ShmupEvent) {
         let old_bolts = std::mem::take(&mut self.bolts);
@@ -518,12 +566,6 @@ impl ShmupFieldGame {
 
                 self.aliens[a_idx].fracture_hits =
                     self.aliens[a_idx].fracture_hits.saturating_add(1);
-                let is_medium_or_large = matches!(
-                    self.aliens[a_idx].role,
-                    AlienRole::ChladniMatriarch
-                        | AlienRole::TwinGunship
-                        | AlienRole::SectorDreadnought
-                );
 
                 let (cleaved, _existing_cracks) = self.aliens[a_idx]
                     .hull
@@ -534,14 +576,11 @@ impl ShmupFieldGame {
                 let mut children = self.aliens[a_idx]
                     .hull
                     .split_connected_components(&mut self.next_body_id, None);
+                let children_len = children.len();
 
-                let max_cleaves = if self.aliens[a_idx].role == AlienRole::SectorDreadnought {
-                    2
-                } else {
-                    1
-                };
-                if is_medium_or_large
-                    && children.len() >= 2
+                let max_cleaves = self.aliens[a_idx].max_survivable_cleaves();
+                if max_cleaves > 0
+                    && children_len >= 2
                     && self.aliens[a_idx].cleave_count < max_cleaves
                 {
                     children.sort_by_key(|c| std::cmp::Reverse(c.active_cell_count()));
@@ -576,64 +615,21 @@ impl ShmupFieldGame {
                             dir_x * 0.12,
                             self.scroll_speed,
                         );
-                        *event = ShmupEvent::AlienFractured {
-                            id: self.aliens[a_idx].hull.id,
-                            role: self.aliens[a_idx].role,
-                            fracture_hits: self.aliens[a_idx].fracture_hits,
-                            severed_shards: severed_count,
-                        };
-                        continue;
+
+                        if !self.aliens[a_idx].is_critically_broken(false, 0) {
+                            *event = ShmupEvent::AlienFractured {
+                                id: self.aliens[a_idx].hull.id,
+                                role: self.aliens[a_idx].role,
+                                fracture_hits: self.aliens[a_idx].fracture_hits,
+                                severed_shards: severed_count,
+                            };
+                            continue;
+                        }
                     }
                 }
 
-                let fatal = if is_medium_or_large {
-                    (cleaved && self.aliens[a_idx].fracture_hits >= 2)
-                        || self.aliens[a_idx].hull.mean_cohesion() < 0.62
-                        || self.aliens[a_idx].hull.active_cell_count() < 12
-                        || children.len() >= 2
-                } else {
-                    cleaved
-                        || self.aliens[a_idx].hull.mean_cohesion() < 0.72
-                        || self.aliens[a_idx].hull.active_cell_count() < 10
-                };
-
-                if fatal {
-                    let dead = self.aliens.swap_remove(a_idx);
-                    if children.len() >= 2 {
-                        self.topological_cleaves += 1;
-                    }
-                    let bounty = match dead.role {
-                        AlienRole::SectorDreadnought => 2000,
-                        AlienRole::ChladniMatriarch => 850,
-                        AlienRole::TwinGunship => 700,
-                        _ => 350,
-                    };
-                    self.score += bounty;
-                    self.credits += bounty;
-                    self.inject_fiery_field_explosion(
-                        dead.hull.x,
-                        dead.hull.y,
-                        dead.hull.radius * 0.85,
-                        3.6,
-                    );
-                    let cubes_n = match dead.role {
-                        AlienRole::SectorDreadnought => 4,
-                        AlienRole::ChladniMatriarch | AlienRole::TwinGunship => 2,
-                        _ => 1,
-                    };
-                    for k in 0..cubes_n {
-                        let off = (k as f32 - 0.5) * 2.2;
-                        self.spawn_power_cube(
-                            dead.hull.x + off,
-                            dead.hull.y.max(2.0),
-                            off * 0.08,
-                            self.scroll_speed * 0.9,
-                        );
-                    }
-                    *event = ShmupEvent::AlienDestroyed {
-                        role: dead.role,
-                        cubes_spawned: cubes_n,
-                    };
+                if self.aliens[a_idx].is_critically_broken(cleaved, children_len) {
+                    self.destroy_alien(a_idx, children_len >= 2, event);
                 } else {
                     self.score += 80;
                     self.credits += 100;
@@ -736,11 +732,24 @@ impl ShmupFieldGame {
                         self.aliens[j]
                             .hull
                             .inflict_progressive_fracture(cx, cy, nx, ny, 1.15, None);
+                        self.aliens[i].fracture_hits =
+                            self.aliens[i].fracture_hits.saturating_add(1);
+                        self.aliens[j].fracture_hits =
+                            self.aliens[j].fracture_hits.saturating_add(1);
                         self.inject_fiery_field_explosion(cx, cy, 2.0, 1.6);
                     } else if self.wave_force_enabled && cy >= 2.0 && cy < self.height as f32 - 2.0 {
                         GaussianImpulse::new(cx, cy, 1.4, 0.75).inject(&mut self.solver.state);
                     }
                 }
+            }
+        }
+
+        // 3c. Sweep & destroy critically fractured or disintegrated alien vessels
+        let mut a_k = self.aliens.len();
+        while a_k > 0 {
+            a_k -= 1;
+            if self.aliens[a_k].is_critically_broken(false, 0) {
+                self.destroy_alien(a_k, false, event);
             }
         }
 
@@ -777,9 +786,7 @@ impl ShmupFieldGame {
                     .split_connected_components(&mut self.next_body_id, None);
 
                 let fatal = is_agm
-                    || (cleaved && self.ground_targets[g_idx].fracture_hits >= 2)
-                    || self.ground_targets[g_idx].hull.mean_cohesion() < 0.64
-                    || children.len() >= 2;
+                    || self.ground_targets[g_idx].is_critically_broken(cleaved, children.len());
 
                 if fatal {
                     let dead = self.ground_targets.swap_remove(g_idx);

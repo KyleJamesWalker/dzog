@@ -576,7 +576,7 @@ impl ShmupFieldGame {
 
             if alien.fire_cooldown > 0 {
                 alien.fire_cooldown -= 1;
-            } else if self.in_play && ay >= 6.0 && ay < py - 14.0 {
+            } else if self.in_play && ay >= 6.0 && ay < py - 14.0 && !alien.weapons_disabled() {
                 let dx = px - ax;
                 let dy = py - ay;
                 let dist = (dx * dx + dy * dy).sqrt().max(1.0);
@@ -646,7 +646,11 @@ impl ShmupFieldGame {
             ) {
                 if gt.fire_cooldown > 0 {
                     gt.fire_cooldown -= 1;
-                } else if self.in_play && gt.hull.y >= 10.0 && gt.hull.y < py - 18.0 {
+                } else if self.in_play
+                    && gt.hull.y >= 10.0
+                    && gt.hull.y < py - 18.0
+                    && !gt.weapons_disabled()
+                {
                     let dx = px - gt.hull.x;
                     let dy = py - gt.hull.y;
                     let dist = (dx * dx + dy * dy).sqrt().max(1.0);

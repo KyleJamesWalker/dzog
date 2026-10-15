@@ -62,18 +62,20 @@ impl Mp4VideoRecorder {
                 "60",
                 "-i",
                 "-",
+                "-vf",
+                "scale=1280:720:flags=neighbor",
                 "-c:v",
                 "libx264",
                 "-pix_fmt",
                 "yuv420p",
                 "-preset",
-                "fast",
+                "medium",
                 "-crf",
-                "21",
+                "25",
                 "-maxrate",
-                "4000k",
+                "1600k",
                 "-bufsize",
-                "8000k",
+                "3200k",
                 &temp_video_path,
             ])
             .stdin(Stdio::piped())
@@ -260,22 +262,30 @@ pub fn launch_gui() {
     );
     game.autopilot_enabled = autopilot;
 
-    let shared_audio_for_rec = game.shared_audio_frame.clone();
-    let recorder = record_cfg.and_then(|(path, secs)| {
-        let scale = 2usize; // 960x540 * 2 = 1920x1080 (Full HD 1080p)
+    if let Some((path, secs)) = record_cfg {
+        let scale = 1usize; // 960x540 piped to ffmpeg and scaled cleanly to 1280x720
         let rw = game.render_width();
         let rh = game.render_height();
         println!(
-            "Recording Crystalline Corridor session to '{}' ({}x{} + 48kHz AAC audio) for {}s...",
-            path,
-            rw * scale,
-            rh * scale,
-            secs
+            "Recording Crystalline Corridor session to '{}' (1280x720 + 48kHz AAC audio) for {}s...",
+            path, secs
         );
-        Mp4VideoRecorder::new(path, rw, rh, scale, secs, shared_audio_for_rec)
-            .map_err(|e| eprintln!("{e}"))
-            .ok()
-    });
+        let shared_audio_for_rec = game.shared_audio_frame.clone();
+        match Mp4VideoRecorder::new(path, rw, rh, scale, secs, shared_audio_for_rec) {
+            Ok(mut rec) => {
+                loop {
+                    game.step();
+                    game.render_to_pixel_buffer();
+                    if rec.write_frame(&game.pixel_buffer) {
+                        rec.finish();
+                        break;
+                    }
+                }
+            }
+            Err(e) => eprintln!("{e}"),
+        }
+        return;
+    }
 
     let start_windowed = std::env::args().any(|a| a == "--windowed");
     let window_mode = if start_windowed {
@@ -301,7 +311,7 @@ pub fn launch_gui() {
             paused: false,
             fire_cooldown: 0,
             fps_ema: 60.0,
-            recorder,
+            recorder: None,
         })
         .add_systems(Startup, setup_scene)
         .add_systems(

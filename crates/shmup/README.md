@@ -2,7 +2,7 @@
 
 A vertical wave-stream shoot-'em-up built on the **Dzog** 2D quantum/acoustic wave-matter lattice (`dzog-core`, `dzog-wgpu`, `dzog-bevy`). For deep-dive engineering trade-offs and 2.5D field design insights, see [**`ARCHITECTURE.md`**](./ARCHITECTURE.md).
 
-![Shmup 1080p VGA Gameplay](../../docs/shmup_fire_and_cracks_v2.png)
+![Shmup 1080p VGA Gameplay](../../docs/shmup_phase2_5_vga.png)
 
 ---
 
