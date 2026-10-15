@@ -1,7 +1,7 @@
 # Dzog Simulator
 <small>by [Jonathan Dunlap](https://www.linkedin.com/in/jonathandunlap/)</small>
 
-**Note: This is highly experimental work for a new proof of concept simulator using quantum field theory.**
+**Note: This is highly experimental work for a new proof of concept simulator using inspiration from quantum field theory.**
 
 Dzog Simulator is a GPU-accelerated quantum 2D wave-matter field-physics engine in Rust.
 
