@@ -205,7 +205,7 @@ pub fn draw_alien_vga(
             let ny = (ly - center) * inv_r;
             let r_norm = (nx * nx + ny * ny).sqrt().clamp(0.0, 1.0);
             let light = (0.76 - dy * inv_r * 0.25 - dx * inv_r * 0.25).clamp(0.32, 1.18);
-            let crack = if coh < 0.68 { (0.68 - coh) * 2.6 } else { 0.0 };
+            let crack = if coh < 0.72 { (0.72 - coh) * 2.6 } else { 0.0 };
 
             let (mut r, mut g, mut b) = match alien.role {
                 AlienRole::TwinGunship | AlienRole::SectorDreadnought => {
@@ -293,19 +293,31 @@ pub fn draw_alien_vga(
                 }
             };
 
+            // Sub-cell jagged lightning-crack fissure inside the fractured cohesion zone (`coh < 0.72`)
             if crack > 0.0 {
-                if coh < 0.36 {
+                let branch1 = ((lx * 3.8 + (ly * 2.7).sin() * 1.35).sin()).abs();
+                let branch2 = ((ly * 4.1 - (lx * 2.9).cos() * 1.25).sin()).abs();
+                let vein_dist = branch1.min(branch2);
+                if coh < 0.52 && vein_dist < 0.16 {
+                    // White-gold hot fracture core (1px wide)
                     r = 1.0;
-                    g = 0.68;
-                    b = 0.18;
-                } else if coh < 0.52 {
+                    g = 0.90;
+                    b = 0.38;
+                } else if coh < 0.62 && vein_dist < 0.34 {
+                    // Molten orange-red crack seam
                     r = 0.96;
                     g = 0.36;
                     b = 0.08;
+                } else if vein_dist < 0.58 {
+                    // Charred black carbon-soot crack lip
+                    r *= 0.22;
+                    g *= 0.20;
+                    b *= 0.22;
                 } else {
-                    r *= 0.42;
-                    g *= 0.38;
-                    b *= 0.38;
+                    // Slightly darkened stressed armor plate around the crack
+                    r *= 0.72;
+                    g *= 0.70;
+                    b *= 0.72;
                 }
             }
 

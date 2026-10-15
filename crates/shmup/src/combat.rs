@@ -22,6 +22,59 @@ use crate::entities::{
 use crate::field_game::ShmupFieldGame;
 
 impl ShmupFieldGame {
+    /// Inject a multi-lobe thermal + compressional explosion directly into the `(pressure, luminescence)`
+    /// lattice so the GPU reaction-diffusion (`luminescence.wgsl`) and FDTD (`pressure.wgsl`) passes
+    /// evolve a fiery detonation that cools into billowing dark smoke.
+    pub fn inject_fiery_field_explosion(&mut self, x: f32, y: f32, radius: f32, intensity: f32) {
+        if !self.wave_force_enabled || y < 2.0 || y >= self.height as f32 - 2.0 {
+            return;
+        }
+        // Moderate acoustic impulse so distant traveling shockwaves don't trigger secondary fire ribbons
+        GaussianImpulse::new(x, y, (radius * 0.65).max(1.2), (intensity * 0.28).min(0.95))
+            .inject(&mut self.solver.state);
+
+        let w = self.width as isize;
+        let h = self.height as isize;
+        if self.solver.state.luminescence.len() != (w * h) as usize {
+            return;
+        }
+
+        // Multi-puff asymmetric fireball + outer smoke skirt seeded into `state.luminescence`
+        let lobes = [
+            (0.0f32, 0.0f32, 1.0f32, 0.55f32),
+            (-radius * 0.48, -radius * 0.32, 0.78, 0.50),
+            (radius * 0.50, -radius * 0.24, 0.74, 0.48),
+            (-radius * 0.28, radius * 0.46, 0.70, 0.52),
+            (radius * 0.38, radius * 0.38, 0.65, 0.50),
+        ];
+        let r_i = (radius.ceil() as isize) + 3;
+        let cx = x.round() as isize;
+        let cy = y.round() as isize;
+
+        for &(ox_l, oy_l, gain, width_scale) in &lobes {
+            let lx = x + ox_l;
+            let ly = y + oy_l;
+            let inv_r2 = 1.0 / (radius * width_scale).max(0.9).powi(2);
+            for dy in -r_i..=r_i {
+                for dx in -r_i..=r_i {
+                    let px = cx + dx;
+                    let py = cy + dy;
+                    if px < 1 || px >= w - 1 || py < 1 || py >= h - 1 {
+                        continue;
+                    }
+                    let d2 = (px as f32 - lx).powi(2) + (py as f32 - ly).powi(2);
+                    let env = (-d2 * inv_r2).exp();
+                    if env > 0.04 {
+                        let idx = (py as usize) * (w as usize) + (px as usize);
+                        self.solver.state.luminescence[idx] =
+                            (self.solver.state.luminescence[idx].max(intensity * gain * env))
+                                .min(4.0);
+                    }
+                }
+            }
+        }
+    }
+
     /// Primary Fire (`Spacebar` / Left-Click): High-force kinetic-soliton projectile bullets.
     ///
     /// - Intact wings fire twin wing-mounted bullet streams alongside the central nose cannon.
@@ -441,25 +494,27 @@ impl ShmupFieldGame {
                 let dir_y = bvy / speed;
                 let energy = if overcharged { 2.25 } else { 1.38 };
 
-                // Impart physical lateral knockback + off-center rotational torque (`r x J`)
-                // while keeping downward descent positive (`vy >= 0.06`) so enemies fight in mid-screen!
+                // Impart punchy backward & lateral recoil + off-center rotational torque (`r x J`)
+                let ay_cur = self.aliens[a_idx].hull.y;
                 let offset_x = hx - self.aliens[a_idx].hull.x;
                 let lateral_kick = if offset_x.abs() < 0.25 {
-                    0.35
+                    0.42
                 } else {
-                    (offset_x * 0.22).clamp(-0.75, 0.75)
+                    (offset_x * 0.28).clamp(-0.85, 0.85)
                 };
                 self.aliens[a_idx].hull.apply_contact_impulse(
                     hx,
                     hy,
-                    (dir_x + lateral_kick) * 2.6 * energy,
-                    -0.35 * energy,
+                    (dir_x + lateral_kick) * 3.4 * energy,
+                    -1.45 * energy,
                     None,
                 );
-                self.aliens[a_idx].hull.vy = self.aliens[a_idx].hull.vy.max(0.06);
+                // Allow brief upward recoil jolt when inside the arena (`y > 22.0`) so hits feel forceful
+                let min_vy = if ay_cur > 22.0 { -0.22 } else { 0.06 };
+                self.aliens[a_idx].hull.vy = self.aliens[a_idx].hull.vy.clamp(min_vy, 0.45);
                 self.aliens[a_idx].hull.omega = (self.aliens[a_idx].hull.omega
-                    + offset_x * 0.026 * energy)
-                    .clamp(-0.16, 0.16);
+                    + offset_x * 0.042 * energy)
+                    .clamp(-0.18, 0.18);
 
                 self.aliens[a_idx].fracture_hits =
                     self.aliens[a_idx].fracture_hits.saturating_add(1);
@@ -474,9 +529,7 @@ impl ShmupFieldGame {
                     .hull
                     .inflict_progressive_fracture(hx, hy, dir_x, dir_y, energy, None);
 
-                if self.wave_force_enabled && hy >= 1.0 && hy < self.height as f32 - 1.0 {
-                    GaussianImpulse::new(hx, hy, 2.0, 2.0 * energy).inject(&mut self.solver.state);
-                }
+                self.inject_fiery_field_explosion(hx, hy, 2.2, 1.55 * energy);
 
                 let mut children = self.aliens[a_idx]
                     .hull
@@ -557,10 +610,12 @@ impl ShmupFieldGame {
                     };
                     self.score += bounty;
                     self.credits += bounty;
-                    if self.wave_force_enabled && dead.hull.y >= 1.0 {
-                        GaussianImpulse::new(dead.hull.x, dead.hull.y, 2.8, 3.2)
-                            .inject(&mut self.solver.state);
-                    }
+                    self.inject_fiery_field_explosion(
+                        dead.hull.x,
+                        dead.hull.y,
+                        dead.hull.radius * 0.85,
+                        3.6,
+                    );
                     let cubes_n = match dead.role {
                         AlienRole::SectorDreadnought => 4,
                         AlienRole::ChladniMatriarch | AlienRole::TwinGunship => 2,
@@ -631,6 +686,60 @@ impl ShmupFieldGame {
                     self.aliens[a_idx]
                         .hull
                         .inflict_progressive_fracture(rx, ry, nx, ny, 1.55, None);
+                }
+            }
+        }
+
+        // 3b. Enemy-to-Enemy Non-Overlap & Field-Coupled Elastic Bumping!
+        let n_aliens = self.aliens.len();
+        for i in 0..n_aliens {
+            for j in (i + 1)..n_aliens {
+                let ax = self.aliens[i].hull.x;
+                let ay = self.aliens[i].hull.y;
+                let bx = self.aliens[j].hull.x;
+                let by = self.aliens[j].hull.y;
+                let min_d = (self.aliens[i].hull.radius + self.aliens[j].hull.radius) * 0.98;
+                let dx = bx - ax;
+                let dy = by - ay;
+                let d2 = dx * dx + dy * dy;
+                if d2 < min_d * min_d && d2 > 0.001 {
+                    let d = d2.sqrt();
+                    let nx = dx / d;
+                    let ny = dy / d;
+                    let overlap = min_d - d;
+
+                    // Separate hulls so enemies never overlap
+                    self.aliens[i].hull.x -= nx * overlap * 0.55;
+                    self.aliens[i].hull.y -= ny * overlap * 0.55;
+                    self.aliens[j].hull.x += nx * overlap * 0.55;
+                    self.aliens[j].hull.y += ny * overlap * 0.55;
+
+                    let rvx = self.aliens[j].hull.vx - self.aliens[i].hull.vx;
+                    let rvy = self.aliens[j].hull.vy - self.aliens[i].hull.vy;
+                    let closing = -(rvx * nx + rvy * ny);
+                    let bump = (closing.max(0.12) * 1.65).min(2.4);
+                    let cx = 0.5 * (ax + bx);
+                    let cy = 0.5 * (ay + by);
+
+                    self.aliens[i]
+                        .hull
+                        .apply_contact_impulse(cx, cy, -nx * bump, -ny * bump, None);
+                    self.aliens[j]
+                        .hull
+                        .apply_contact_impulse(cx, cy, nx * bump, ny * bump, None);
+
+                    if closing > 0.28 {
+                        // High-speed knockback collision cracks both hulls & sparks the field!
+                        self.aliens[i]
+                            .hull
+                            .inflict_progressive_fracture(cx, cy, -nx, -ny, 1.15, None);
+                        self.aliens[j]
+                            .hull
+                            .inflict_progressive_fracture(cx, cy, nx, ny, 1.15, None);
+                        self.inject_fiery_field_explosion(cx, cy, 2.0, 1.6);
+                    } else if self.wave_force_enabled && cy >= 2.0 && cy < self.height as f32 - 2.0 {
+                        GaussianImpulse::new(cx, cy, 1.4, 0.75).inject(&mut self.solver.state);
+                    }
                 }
             }
         }
@@ -715,18 +824,12 @@ impl ShmupFieldGame {
                         radius: dead.hull.radius * if is_agm { 1.35 } else { 1.15 },
                         ember_heat: 1.0,
                     });
-                    if self.wave_force_enabled
-                        && dead.hull.y >= 2.0
-                        && dead.hull.y < self.height as f32 - 2.0
-                    {
-                        GaussianImpulse::new(
-                            dead.hull.x,
-                            dead.hull.y,
-                            if is_agm { 3.8 } else { 3.2 },
-                            if is_agm { 4.2 } else { 3.6 },
-                        )
-                        .inject(&mut self.solver.state);
-                    }
+                    self.inject_fiery_field_explosion(
+                        dead.hull.x,
+                        dead.hull.y,
+                        dead.hull.radius * if is_agm { 1.10 } else { 0.95 },
+                        if is_agm { 3.9 } else { 3.4 },
+                    );
                     let bounty = match dead.kind {
                         GroundTargetKind::BiodomeReactor => 1200,
                         GroundTargetKind::GeodesicFuelDome => 800,
@@ -774,6 +877,7 @@ impl ShmupFieldGame {
                     }
                     self.score += 75;
                     self.credits += 90;
+                    self.inject_fiery_field_explosion(hx, hy, 2.0, 1.45 * energy);
                     *event = ShmupEvent::GroundTargetFractured {
                         id: self.ground_targets[g_idx].hull.id,
                         kind: self.ground_targets[g_idx].kind,
@@ -809,7 +913,7 @@ impl ShmupFieldGame {
                             && gt.hull.y < self.height as f32 - 2.0
                         {
                             let mut pkt =
-                                DirectionalWavePacket::new(gt.hull.x, gt.hull.y, 2.2, 2.4, ang);
+                                DirectionalWavePacket::new(gt.hull.x, gt.hull.y, 1.8, 0.85, ang);
                             pkt.inject_wrapped(
                                 &mut self.solver.state,
                                 &self.solver.material,

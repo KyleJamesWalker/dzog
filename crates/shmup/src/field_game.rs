@@ -502,16 +502,16 @@ impl ShmupFieldGame {
                         matriarch_positions.iter().find(|&&(id, ..)| id == matriarch_id)
                     {
                         let slot_ang = FRAC_PI_2
-                            + (nodal_slot as f32 - 1.0) * 0.75
-                            + (phase * 0.25).sin() * 0.25;
-                        let node_x = mx + slot_ang.cos() * 14.0;
-                        let node_y = my + slot_ang.sin() * 12.0;
+                            + (nodal_slot as f32 - 1.0) * 0.82
+                            + (phase * 0.25).sin() * 0.22;
+                        let node_x = mx + slot_ang.cos() * 16.5;
+                        let node_y = my + slot_ang.sin() * 14.5;
                         let ndx = node_x - ax;
                         let ndy = node_y - ay;
                         alien.hull.vx =
-                            (alien.hull.vx * 0.90 + ndx * 0.025 + q_fx * 0.045).clamp(-0.42, 0.42);
+                            (alien.hull.vx * 0.90 + ndx * 0.025 + q_fx * 0.045).clamp(-0.48, 0.48);
                         alien.hull.vy =
-                            (alien.hull.vy * 0.90 + ndy * 0.025 + q_fy * 0.045).clamp(-0.25, 0.42);
+                            (alien.hull.vy * 0.90 + ndy * 0.025 + q_fy * 0.045).clamp(-0.25, 0.48);
                     } else if let Some((cx, cy)) = nearest_cube {
                         let dx = cx - ax;
                         let dy = cy - ay;
@@ -541,11 +541,9 @@ impl ShmupFieldGame {
 
             // Attitude stabilization vs. asymmetrical thruster careening when fractured/cleaved
             if alien.cleave_count > 0 {
-                // Missing a wing/nacelle causes asymmetrical thrust drift and yaw!
                 let spin_dir = if alien.hull.omega >= 0.0 { 1.0 } else { -1.0 };
                 alien.hull.omega = (alien.hull.omega * 0.96 + spin_dir * 0.004).clamp(-0.14, 0.14);
             } else {
-                // Intact attitude thrusters gently right the ship after bullet torque kicks
                 let mut angle_err = FRAC_PI_2 - alien.hull.theta;
                 if angle_err > std::f32::consts::PI {
                     angle_err -= TAU;
@@ -553,6 +551,27 @@ impl ShmupFieldGame {
                     angle_err += TAU;
                 }
                 alien.hull.omega = (alien.hull.omega * 0.86 + angle_err * 0.045).clamp(-0.15, 0.15);
+            }
+
+            // Damaged enemy hulls bleed thermal smoke/fire into the reaction-diffusion luminescence field!
+            if alien.fracture_hits > 0
+                && ay >= 4.0
+                && ay < self.height as f32 - 4.0
+                && self.spawn_timer % 3 == 0
+            {
+                let sx = (ax + (alien.carrier_phase * 2.3).sin() * 2.0)
+                    .clamp(3.0, self.width as f32 - 4.0) as usize;
+                let sy = (ay - 1.5).clamp(3.0, self.height as f32 - 4.0) as usize;
+                let idx = self.solver.state.config.index(sx, sy);
+                if idx < self.solver.state.luminescence.len() {
+                    let intensity = if alien.cleave_count > 0 || alien.fracture_hits >= 2 {
+                        1.25
+                    } else {
+                        0.72
+                    };
+                    self.solver.state.luminescence[idx] =
+                        self.solver.state.luminescence[idx].max(intensity);
+                }
             }
 
             if alien.fire_cooldown > 0 {
@@ -826,6 +845,7 @@ impl ShmupFieldGame {
         let f_substeps = self.solver.config.substeps_per_macro;
         let mut queries: Vec<GpuBodyQuery> = Vec::new();
         let mut rock_query_indices: Vec<usize> = Vec::new();
+        let mut alien_query_indices: Vec<usize> = Vec::new();
         let mut cube_query_indices: Vec<usize> = Vec::new();
 
         if self.wave_force_enabled {
@@ -837,6 +857,17 @@ impl ShmupFieldGame {
                         y: rock.y,
                         radius: rock.radius,
                         yield_pressure: rock.material.yield_pressure,
+                    });
+                }
+            }
+            for (idx, alien) in self.aliens.iter().enumerate() {
+                if alien.hull.y >= 2.0 && alien.hull.y < self.height as f32 - 2.0 {
+                    alien_query_indices.push(idx);
+                    queries.push(GpuBodyQuery {
+                        x: alien.hull.x,
+                        y: alien.hull.y,
+                        radius: alien.hull.radius,
+                        yield_pressure: alien.hull.material.yield_pressure,
                     });
                 }
             }
@@ -859,18 +890,29 @@ impl ShmupFieldGame {
 
         if self.wave_force_enabled {
             let n_rock_q = rock_query_indices.len();
+            let n_alien_q = alien_query_indices.len();
             for (&r_idx, red) in rock_query_indices
                 .iter()
                 .zip(reductions.iter().take(n_rock_q))
             {
                 let rock = &mut self.asteroids[r_idx];
-                rock.vx = (rock.vx + red.fx / rock.mass).clamp(-0.55, 0.55);
-                rock.vy = (rock.vy + red.fy / rock.mass).clamp(-0.20, 0.58);
-                rock.omega = (rock.omega + red.tau_z / rock.inertia).clamp(-0.14, 0.14);
+                rock.vx = (rock.vx + red.fx / rock.mass).clamp(-0.65, 0.65);
+                rock.vy = (rock.vy + red.fy / rock.mass).clamp(-0.25, 0.65);
+                rock.omega = (rock.omega + red.tau_z / rock.inertia).clamp(-0.15, 0.15);
+            }
+            for (&a_idx, red) in alien_query_indices
+                .iter()
+                .zip(reductions.iter().skip(n_rock_q).take(n_alien_q))
+            {
+                let alien = &mut self.aliens[a_idx];
+                alien.hull.vx = (alien.hull.vx + red.fx / alien.hull.mass).clamp(-0.65, 0.65);
+                alien.hull.vy = (alien.hull.vy + red.fy / alien.hull.mass).clamp(-0.22, 0.55);
+                alien.hull.omega =
+                    (alien.hull.omega + red.tau_z / alien.hull.inertia).clamp(-0.16, 0.16);
             }
             for (&c_idx, red) in cube_query_indices
                 .iter()
-                .zip(reductions.iter().skip(n_rock_q))
+                .zip(reductions.iter().skip(n_rock_q + n_alien_q))
             {
                 let cube = &mut self.power_cubes[c_idx];
                 cube.body.vx = (cube.body.vx + red.fx / cube.body.mass).clamp(-0.48, 0.48);

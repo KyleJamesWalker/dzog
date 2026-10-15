@@ -256,4 +256,22 @@ fn test_progressive_enemy_fracturing_and_ground_waveguide_chain_detonation() {
         game.pixel_buffer.len(),
         game.render_width() * game.render_height() * 4
     );
+
+    // 4. Verify overlapping enemy ships bump off each other without overlapping
+    game.aliens.truncate(2);
+    game.aliens[0].hull.x = 110.0;
+    game.aliens[0].hull.y = 45.0;
+    game.aliens[0].hull.vx = 0.25;
+    game.aliens[1].hull.x = 113.0;
+    game.aliens[1].hull.y = 45.0;
+    game.aliens[1].hull.vx = -0.25;
+    let d_before = (game.aliens[1].hull.x - game.aliens[0].hull.x).abs();
+    game.step();
+    let d_after = (game.aliens[1].hull.x - game.aliens[0].hull.x).abs();
+    assert!(
+        d_after > d_before,
+        "Overlapping enemy ships must bump apart on collision (d_before={}, d_after={})",
+        d_before,
+        d_after
+    );
 }

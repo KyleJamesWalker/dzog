@@ -81,10 +81,10 @@ impl ShmupFieldGame {
         for slot in 0..drone_count {
             let d_id = self.next_body_id;
             self.next_body_id += 1;
-            let ang = FRAC_PI_2 + (slot as f32 - (drone_count as f32 - 1.0) * 0.5) * 0.72;
-            let r_nodal = 14.5;
+            let ang = FRAC_PI_2 + (slot as f32 - (drone_count as f32 - 1.0) * 0.5) * 0.78;
+            let r_nodal = 17.5;
             let dx = (mx + ang.cos() * r_nodal).clamp(26.0, w - 26.0);
-            let dy = my - 6.0 + ang.sin() * r_nodal * 0.5;
+            let dy = my - 8.0 - (slot as f32 * 3.5) + ang.sin() * r_nodal * 0.5;
             let mut d_hull = CohesiveBody::new_saucer(d_id, dx, dy, 3.1);
             d_hull.vy = self.scroll_speed * 0.94;
             d_hull.theta = FRAC_PI_2;

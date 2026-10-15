@@ -2,7 +2,7 @@
 
 A vertical wave-stream shoot-'em-up built on the **Dzog** 2D quantum/acoustic wave-matter lattice (`dzog-core`, `dzog-wgpu`, `dzog-bevy`). For deep-dive engineering trade-offs and 2.5D field design insights, see [**`ARCHITECTURE.md`**](./ARCHITECTURE.md).
 
-![Shmup 1080p VGA Gameplay](../../docs/shmup_clean_v3.png)
+![Shmup 1080p VGA Gameplay](../../docs/shmup_fire_and_cracks_v2.png)
 
 ---
 
@@ -16,15 +16,17 @@ Unlike traditional shmups where ships and buildings are isolated bounding boxes 
    - Capturing contested **Annealing Power Canisters** triggers reversible exciton annealing ($\Delta C > 0$), regrowing severed wings from the core outward.
 2. **Primary Weapon — Kinetic-Force Projectile Bullets (`[Space]` / `RT`)**:
    - Fires 1–3 parallel high-velocity projectile streams (scaling with intact wings) with forward Doppler amplification.
-   - Off-center hits impart linear knockback ($\Delta \mathbf{P} = \mathbf{J}$) and rotational torque ($\Delta L_z = (\mathbf{r} \times \mathbf{J})_z$), physically shoving and spinning enemy craft while carving glowing internal fracture waveguides (`0.15 <= C < 0.68`).
-3. **Progressive Multi-Stage Enemy Fracturing & Flying Wreckage**:
+   - Off-center hits impart punchy linear recoil ($\Delta \mathbf{P} = \mathbf{J}$) and rotational torque ($\Delta L_z = (\mathbf{r} \times \mathbf{J})_z$), physically shoving and spinning enemy craft while carving jagged 1px molten-orange/white-gold fracture veins framed by charred carbon-soot lips.
+3. **Progressive Multi-Stage Enemy Fracturing & Non-Overlapping Collisions**:
    - Repeated strikes on existing fractures deepen and branch the cleavage seams until wings or engine nacelles topologically sever via Breadth-First Search (`split_connected_components`).
-   - Severed enemy pods spin off at high speed and smash into other airborne enemies, while the crippled enemy core banks and careens under asymmetrical thrust.
-4. **Alt-Fire — Twin Air-to-Ground Missiles (`[E]` / `[Q]` / Gamepad `X`/`LT`)**:
-   - Launches finned Air-to-Ground Missiles that fly *beneath* airborne squadrons, home onto ground installations (`GeodesicFuelDome`, `BiodomeReactor`, `FlakTurret`, `CanalPatrolBoat`), and detonate with seismic overpressure (`energy = 2.65`), leaving persistent `ScorchedCrater` blast rings.
-5. **Sympathetic Waveguide Pipeline Chain-Detonations**:
+   - Airborne enemies participate in GPU field force reduction ($-\nabla p, -\nabla Q$) and bump elastically off one another without overlapping—knocking a damaged enemy into a neighbor transfers spin and inflicts sympathetic hull fractures.
+4. **Field-Driven Fiery Explosions & Rolling Dark Smoke (`luminescence.wgsl`)**:
+   - Impacts and detonations seed multi-lobe thermal kernels into the GPU reaction-diffusion luminescence field $L(\mathbf{x}, t)$. High $L$ renders as white-gold and fiery orange-crimson flames; as $L$ diffuses ($\nabla^2 L$) and cools ($e^{-\gamma_L \Delta t}$), it naturally condenses into billowing dark charcoal smoke clouds.
+5. **Alt-Fire — Twin Air-to-Ground Missiles (`[E]` / Gamepad `X`/`LT`)**:
+   - Launches finned Air-to-Ground Missiles that fly *beneath* airborne squadrons, home onto ground installations (`GeodesicFuelDome`, `BiodomeReactor`, `FlakTurret`, `CanalPatrolBoat`), and detonate with seismic overpressure (`energy = 2.65`), leaving persistent `ScorchedCrater` pits and `GroundedWreckage` building rubble.
+6. **Sympathetic Waveguide Pipeline Chain-Detonations**:
    - Ground fuel domes and biodomes are linked by ribbed `PiezoQuartz` acoustic waveguide pipelines. Detonating a dome injects a guided shockwave along the conduit that sympathetically fractures and detonates connected turrets and reactors, awarding bonus bounty (`$`).
-6. **1080p (`16:9`) Sub-Cell VGA Renderer**:
+7. **1080p (`16:9`) Sub-Cell VGA Renderer (`148+ FPS`)**:
    - Steps FDTD physics on a `240×135` (`16:9`) lattice while rendering at `4×` sub-cell supersampling (`960×540`), upscaled cleanly via nearest-neighbor to `1920×1080` (1080p) and `3840×2160` (4K) borderless fullscreen displays.
 
 ---
@@ -37,13 +39,14 @@ Connected gamepads/controllers are detected automatically via Bevy (`bevy_gilrs`
 | :--- | :--- | :--- |
 | **4-Way Planar Thrust** | `WASD` or `Arrow Keys` | `Left Stick` or `D-Pad` |
 | **Primary: Force Bullets** | `Space` or `Left-Click` | `South (A / Cross)` or `RT / RB` |
-| **Alt-Fire: Air-to-Ground Missiles** | `E`, `Q`, or `Middle-Click` | `West (X / Square)`, `East (B)`, or `LT` |
+| **Alt-Fire: Air-to-Ground Missiles** | `E` or `Middle-Click` | `West (X / Square)`, `East (B)`, or `LT` |
 | **Antiphase Shield & Attractor** | `Shift` or `Right-Click` | `North (Y / Triangle)` or `LB` |
 | **Toggle Fullscreen / Windowed** | `F11` | — |
 | **Toggle Autopilot** | `T` | — |
 | **Cycle Perceptual Field Views** | `V` | `Select / Back` |
 | **Save / Restore Branch (`Checkpoint`)** | `B` / `U` | — |
 | **Pause / Reset** | `P` / `R` | `Start` (Pause) |
+| **Quit Game** | `Escape` or `Q` | — |
 | **Toggle Binaural Cockpit Audio** | `N` | — |
 
 ---

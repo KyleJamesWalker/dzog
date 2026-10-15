@@ -226,7 +226,7 @@ fn capture_isolated_toy_scenarios(out_dir: &str) {
         save_game_png(&mut game, &format!("{out_dir}/toy_1_player_clean.png"));
     }
 
-    // Toy Scenario 2: Isolated Ground Buildings & Horizon Shadows
+    // Toy Scenario 2: Distinct Ship & Building Cracking + Enemy-to-Enemy Non-Overlap Bump
     {
         let mut game = ShmupFieldGame::new(
             ShmupFieldGame::DEFAULT_WIDTH,
@@ -239,41 +239,70 @@ fn capture_isolated_toy_scenarios(out_dir: &str) {
         game.solver.state.clear();
         game.in_play = false;
 
-        let d_hull =
-            CohesiveBody::new_geodesic_dome(501, 70.0, 58.0, 6.8, MineralClass::BismuthCrystal);
+        let mut d_hull =
+            CohesiveBody::new_geodesic_dome(501, 68.0, 62.0, 6.8, MineralClass::BismuthCrystal);
+        d_hull.inflict_progressive_fracture(67.0, 62.0, 0.5, -0.8, 1.45, None);
+        for (&occ, c) in d_hull.occupied.iter().zip(d_hull.cohesion.iter_mut()) {
+            if occ && *c < 0.22 {
+                *c = 0.22;
+            }
+        }
         game.ground_targets.push(GroundTarget {
             kind: GroundTargetKind::GeodesicFuelDome,
             hull: d_hull,
             fire_cooldown: 999,
-            fracture_hits: 0,
+            fracture_hits: 2,
             pipeline_group: 1,
         });
 
-        let b_hull =
-            CohesiveBody::new_geodesic_dome(502, 172.0, 56.0, 7.6, MineralClass::PiezoQuartz);
+        let mut b_hull =
+            CohesiveBody::new_geodesic_dome(502, 172.0, 60.0, 7.6, MineralClass::PiezoQuartz);
+        b_hull.inflict_progressive_fracture(171.0, 60.0, -0.6, -0.8, 1.55, None);
+        for (&occ, c) in b_hull.occupied.iter().zip(b_hull.cohesion.iter_mut()) {
+            if occ && *c < 0.22 {
+                *c = 0.22;
+            }
+        }
         game.ground_targets.push(GroundTarget {
             kind: GroundTargetKind::BiodomeReactor,
             hull: b_hull,
             fire_cooldown: 999,
-            fracture_hits: 0,
+            fracture_hits: 2,
             pipeline_group: 1,
         });
 
-        let t_hull =
-            CohesiveBody::new_geodesic_dome(503, 92.0, 48.0, 4.8, MineralClass::ObsidianAnvil);
-        game.ground_targets.push(GroundTarget {
-            kind: GroundTargetKind::FlakTurret,
-            hull: t_hull,
+        // Two TwinGunships that bumped off each other with distinct progressive hull cracking
+        let mut g1 = CohesiveBody::new_twin_gunship(503, 108.0, 54.0, 6.8);
+        g1.theta = std::f32::consts::FRAC_PI_2 - 0.22;
+        g1.inflict_progressive_fracture(106.5, 54.0, 0.2, -1.0, 1.45, None);
+        game.aliens.push(entities::AlienVessel {
+            role: entities::AlienRole::TwinGunship,
+            hull: g1,
             fire_cooldown: 999,
-            fracture_hits: 0,
-            pipeline_group: 1,
+            carrier_phase: 0.0,
+            cubes_healed: 0,
+            fracture_hits: 2,
+            cleave_count: 0,
+        });
+
+        let mut g2 = CohesiveBody::new_twin_gunship(504, 130.0, 52.0, 6.8);
+        g2.theta = std::f32::consts::FRAC_PI_2 + 0.24;
+        g2.inflict_progressive_fracture(131.5, 52.0, -0.2, -1.0, 1.55, None);
+        game.aliens.push(entities::AlienVessel {
+            role: entities::AlienRole::TwinGunship,
+            hull: g2,
+            fire_cooldown: 999,
+            carrier_phase: 0.0,
+            cubes_healed: 0,
+            fracture_hits: 2,
+            cleave_count: 0,
         });
 
         game.sync_all_bodies_to_lattice();
         save_game_png(&mut game, &format!("{out_dir}/toy_2_shadows_and_roof.png"));
     }
 
-    // Toy Scenario 3: Isolated Destroyed Building Crater & Grounded Building Wreckage
+    // Toy Scenario 3: Field-Driven Fiery Explosions & Rolling Dark Smoke (3 stages of evolution)
     {
         let mut game = ShmupFieldGame::new(
             ShmupFieldGame::DEFAULT_WIDTH,
@@ -286,21 +315,42 @@ fn capture_isolated_toy_scenarios(out_dir: &str) {
         game.solver.state.clear();
         game.in_play = false;
 
+        // Stage A (Right, x=172, y=64): Older blast that has diffused into billowing dark smoke over a crater & rubble
         game.craters.push(ScorchedCrater {
-            x: 168.0,
-            y: 62.0,
+            x: 172.0,
+            y: 64.0,
             radius: 7.5,
             ember_heat: 0.9,
         });
         let rubble =
-            CohesiveBody::new_asteroid(703, 172.0, 65.0, 4.2, 6, 33, MineralClass::ObsidianAnvil);
+            CohesiveBody::new_asteroid(703, 175.0, 66.0, 4.2, 6, 33, MineralClass::ObsidianAnvil);
         game.grounded_wreckage.push(GroundedWreckage {
             body: rubble,
             z: 0.48,
-            skid_start_x: 168.0,
+            skid_start_x: 170.0,
             skid_start_y: 62.0,
             ember_heat: 1.0,
         });
+        game.inject_fiery_field_explosion(172.0, 64.0, 5.5, 2.2);
+        for _ in 0..8 {
+            game.gpu_accel.step(&mut game.solver, 4);
+        }
+
+        // Stage B (Center, x=120, y=58): Mid-stage expanding orange/crimson fireball with outer dark smoke rim
+        game.inject_fiery_field_explosion(120.0, 58.0, 6.0, 3.4);
+        for _ in 0..3 {
+            game.gpu_accel.step(&mut game.solver, 4);
+        }
+
+        // Stage C (Left, x=70, y=60): Fresh white-hot detonation core + fiery orange lobes
+        game.craters.push(ScorchedCrater {
+            x: 70.0,
+            y: 60.0,
+            radius: 6.8,
+            ember_heat: 1.0,
+        });
+        game.inject_fiery_field_explosion(70.0, 60.0, 6.2, 4.0);
+
         game.sync_all_bodies_to_lattice();
         save_game_png(&mut game, &format!("{out_dir}/toy_3_wreckage_and_splash.png"));
     }

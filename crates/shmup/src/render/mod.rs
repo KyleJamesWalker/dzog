@@ -479,6 +479,11 @@ impl ShmupFieldGame {
         }
         draw_bolts_vga(&mut self.pixel_buffer, rw, rh, scale, &self.bolts);
 
+        // 5b. Field-Driven Fiery Explosions & Rolling Smoke (from GPU reaction-diffusion `luminescence` + `velocity`)
+        if self.view_mode == FieldViewMode::CompositeArcade && has_lum {
+            self.draw_field_fire_and_smoke(rw, rh, scale);
+        }
+
         // 6. Diegetic Side Gauges, "$00000000" Bounty Counter & Ordnance Badge
         let hull_ratio =
             self.player_hull.mean_cohesion() * (self.player_intact_lobes() as f32 / 3.0);
@@ -495,5 +500,100 @@ impl ShmupFieldGame {
             wave_ratio,
         );
         Self::draw_raptor_bounty_ticker(&mut self.pixel_buffer, rw, rh, scale, credits);
+    }
+
+    /// Render fiery explosions and billowing dark charcoal smoke directly from the evolving
+    /// reaction-diffusion `luminescence` (`L`) and hydrodynamic `velocity` (`vx, vy`) fields.
+    ///
+    /// - High `L > 1.75`: White-gold detonation core.
+    /// - Mid `L in (1.05, 1.75]`: Turbulent orange fireball.
+    /// - Rim `L in (0.65, 1.05]`: Crimson-red flame tongues.
+    /// - Diffused tail `L in [0.28, 0.65]`: Rolling dark charcoal smoke clouds.
+    fn draw_field_fire_and_smoke(&mut self, rw: usize, _rh: usize, scale: usize) {
+        let w = self.width;
+        let h = self.height;
+        let inv_s = 1.0 / (scale as f32);
+
+        for gy in 1..(h - 1) {
+            let row_base = gy * w;
+            for gx in 1..(w - 1) {
+                let idx = row_base + gx;
+                let l00 = self.solver.state.luminescence[idx];
+                let l10 = self.solver.state.luminescence[idx + 1];
+                let l01 = self.solver.state.luminescence[idx + w];
+                let l11 = self.solver.state.luminescence[idx + w + 1];
+                let l_max = l00.max(l10).max(l01).max(l11);
+                if l_max < 0.28 {
+                    continue;
+                }
+
+                let vx = self.solver.state.vx[idx];
+                let vy = self.solver.state.vy[idx];
+                let vort = (vx.abs() + vy.abs()).min(1.2) * 0.14;
+                let base_py = gy * scale;
+                let base_px = gx * scale;
+
+                for sy in 0..scale {
+                    let fy = (sy as f32 + 0.5) * inv_s;
+                    let py = base_py + sy;
+                    let row_off = py * rw + base_px;
+                    for sx in 0..scale {
+                        let fx = (sx as f32 + 0.5) * inv_s;
+                        let px = base_px + sx;
+                        let l_top = l00 * (1.0 - fx) + l10 * fx;
+                        let l_bot = l01 * (1.0 - fx) + l11 * fx;
+                        let l_val = l_top * (1.0 - fy) + l_bot * fy;
+                        if l_val < 0.28 {
+                            continue;
+                        }
+
+                        // Multi-frequency cellular turbulence so fireballs have billowing smoke rims & textured cores
+                        let puff = ((px as f32 * 0.28 + py as f32 * 0.19).sin()
+                            * (px as f32 * 0.17 - py as f32 * 0.31).cos())
+                            * 0.38;
+                        let mut h_val = (px as u32)
+                            .wrapping_mul(374761393)
+                            .wrapping_add((py as u32).wrapping_mul(668265263));
+                        h_val = (h_val ^ (h_val >> 13)).wrapping_mul(1274126177);
+                        let dither = (((h_val >> 16) & 7) as f32 - 3.5) * 0.065 + puff + vort;
+                        let l_eff = l_val + dither;
+                        if l_eff < 0.32 {
+                            continue;
+                        }
+
+                        let p_idx = (row_off + sx) * 4;
+                        if l_eff > 2.85 {
+                            // Compact white-yellow hot detonation core
+                            self.pixel_buffer[p_idx..p_idx + 4]
+                                .copy_from_slice(&[255, 248, 184, 255]);
+                        } else if l_eff > 2.05 {
+                            // Bright golden-orange flame
+                            self.pixel_buffer[p_idx..p_idx + 4]
+                                .copy_from_slice(&[252, 168, 32, 255]);
+                        } else if l_eff > 1.40 {
+                            // Deep fiery orange-red flame
+                            self.pixel_buffer[p_idx..p_idx + 4]
+                                .copy_from_slice(&[232, 88, 20, 255]);
+                        } else if l_eff > 0.92 {
+                            // Dark crimson-charcoal scorched flame rim
+                            self.pixel_buffer[p_idx..p_idx + 4]
+                                .copy_from_slice(&[148, 32, 16, 255]);
+                        } else {
+                            // Wide billowing dark charcoal smoke envelope (`0.32 <= l_eff <= 0.92`)
+                            let smoke_alpha = ((l_eff - 0.32) / 0.60).clamp(0.25, 0.82);
+                            let keep = 1.0 - smoke_alpha;
+                            self.pixel_buffer[p_idx] =
+                                (self.pixel_buffer[p_idx] as f32 * keep + 22.0 * smoke_alpha) as u8;
+                            self.pixel_buffer[p_idx + 1] =
+                                (self.pixel_buffer[p_idx + 1] as f32 * keep + 20.0 * smoke_alpha)
+                                    as u8;
+                            self.pixel_buffer[p_idx + 2] =
+                                (self.pixel_buffer[p_idx + 2] as f32 * keep + 24.0 * smoke_alpha)
+                                    as u8;
+                        }
+                    }
+                }
+            }
+        }
     }
 }

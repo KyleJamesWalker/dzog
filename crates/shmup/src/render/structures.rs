@@ -52,7 +52,7 @@ pub fn draw_ground_target_vga(
             let r_norm = (nx * nx + ny * ny).sqrt().clamp(0.0, 1.0);
             let nz = (1.0 - r_norm * r_norm * 0.88).max(0.08).sqrt();
             let spec = (-nx * 0.48 - ny * 0.52 + nz * 0.68).clamp(0.18, 1.28);
-            let crack = if coh < 0.68 { (0.68 - coh) * 2.6 } else { 0.0 };
+            let crack = if coh < 0.72 { (0.72 - coh) * 2.6 } else { 0.0 };
 
             let (mut r, mut g, mut b) = match gt.kind {
                 GroundTargetKind::GeodesicFuelDome => {
@@ -124,24 +124,27 @@ pub fn draw_ground_target_vga(
                 }
             };
 
-            // Damaged building fractures render as charred dark structural fissures (`ss_7541140`)
-            // rather than neon orange bands
+            // Sub-cell jagged structural crack fissure framed by charred soot (`ss_7541140`)
             if crack > 0.0 {
-                if coh < 0.36 {
-                    let spark = ((px + py * 3) % 11 == 0) && coh < 0.28;
-                    if spark {
-                        r = 0.85;
-                        g = 0.38;
-                        b = 0.12;
-                    } else {
-                        r *= 0.25;
-                        g *= 0.24;
-                        b *= 0.26;
-                    }
+                let branch1 = ((lx * 3.6 + (ly * 2.5).sin() * 1.4).sin()).abs();
+                let branch2 = ((ly * 3.9 - (lx * 2.8).cos() * 1.3).sin()).abs();
+                let vein_dist = branch1.min(branch2);
+                if coh < 0.50 && vein_dist < 0.15 {
+                    r = 1.0;
+                    g = 0.85;
+                    b = 0.32;
+                } else if coh < 0.62 && vein_dist < 0.32 {
+                    r = 0.94;
+                    g = 0.34;
+                    b = 0.08;
+                } else if vein_dist < 0.56 {
+                    r *= 0.20;
+                    g *= 0.18;
+                    b *= 0.20;
                 } else {
-                    r *= 0.52;
-                    g *= 0.50;
-                    b *= 0.52;
+                    r *= 0.70;
+                    g *= 0.68;
+                    b *= 0.70;
                 }
             }
 
