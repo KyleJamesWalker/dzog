@@ -42,7 +42,7 @@ jobs:
         with:
           key: release
 
-      - run: cargo build --release --locked -p shmup -p asteroids -p pong
+      - run: cargo build --release --locked -p shmup -p asteroids
 
       - name: Package
         id: package
@@ -53,7 +53,7 @@ jobs:
           name="dzog-${VERSION:-${SHA::7}}-${{ matrix.os }}-${{ matrix.arch }}"
           exe=$([[ ${{ matrix.os }} == windows ]] && echo .exe || true)
           mkdir -p "dist/$name"
-          cp "target/release/shmup$exe" "target/release/asteroids$exe" "target/release/pong$exe" readme.md LICENSE "dist/$name/"
+          cp "target/release/shmup$exe" "target/release/asteroids$exe" readme.md LICENSE "dist/$name/"
           cd dist
           if [[ ${{ matrix.os }} == windows ]]; then
             7z a -tzip "$name.zip" "$name" > /dev/null

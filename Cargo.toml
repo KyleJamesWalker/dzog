@@ -5,7 +5,6 @@ members = [
     "crates/dzog-wgpu",
     "crates/dzog-bevy",
     "crates/shmup",
-    "pong",
     "asteroids",
 ]
 
@@ -28,6 +27,7 @@ bevy = { version = "0.20", default-features = false, features = [
     "2d",
     "ui",
     "bevy_audio",
+    "bevy_gilrs",
 ] }
 
 [profile.dev]

@@ -19,6 +19,13 @@ pub struct MaterialField {
     /// Critical acoustic pressure threshold |p| above which overpressure erodes cohesion.
     #[serde(default)]
     pub yield_pressure: Vec<f32>,
+    /// Topographic surface elevation field h(x, y) in [0.0, 1.0] for 2.5D slope guidance (-grad h)
+    /// and single-pass horizon shadow propagation.
+    #[serde(default)]
+    pub elevation: Vec<f32>,
+    /// Propagated solar shadow horizon h_shadow(x, y) >= h(x, y); cells with h_shadow > h are in shadow.
+    #[serde(default)]
+    pub shadow_horizon: Vec<f32>,
 }
 
 impl MaterialField {
@@ -36,6 +43,8 @@ impl MaterialField {
             damping: vec![gamma; count],
             cohesion: vec![0.0; count],
             yield_pressure: vec![f32::INFINITY; count],
+            elevation: vec![0.0; count],
+            shadow_horizon: vec![0.0; count],
         }
     }
 
@@ -256,5 +265,85 @@ impl MaterialField {
             }
         }
         Ok(())
+    }
+
+    /// Sample surface elevation `h(x, y)` and downhill slope normal `(-dh/dx, -dh/dy)` at
+    /// continuous lattice coordinate `(wx, wy)` in `O(1)` time via central differences.
+    #[inline]
+    pub fn elevation_and_gradient_at(&self, wx: f32, wy: f32) -> (f32, f32, f32) {
+        if self.elevation.is_empty() {
+            return (0.0, 0.0, 0.0);
+        }
+        let w = self.config.width;
+        let h = self.config.height;
+        let gx = (wx.round() as isize).clamp(0, w as isize - 1) as usize;
+        let gy = (wy.round() as isize).clamp(0, h as isize - 1) as usize;
+
+        let elev = self.elevation[gy * w + gx];
+        let xm = gx.saturating_sub(1);
+        let xp = (gx + 1).min(w - 1);
+        let ym = gy.saturating_sub(1);
+        let yp = (gy + 1).min(h - 1);
+
+        let dh_dx = 0.5 * (self.elevation[gy * w + xp] - self.elevation[gy * w + xm]);
+        let dh_dy = 0.5 * (self.elevation[yp * w + gx] - self.elevation[ym * w + gx]);
+        let mag = (dh_dx * dh_dx + dh_dy * dh_dy + 0.16).sqrt();
+        (elev, -dh_dx / mag, -dh_dy / mag)
+    }
+
+    /// Single-pass `O(cells)` dynamic-programming shadow horizon sweep along sun ray `(-1, +1)`.
+    ///
+    /// Every elevated terrain cliff, platform edge, dome, or turret automatically casts a
+    /// height-proportional shadow into `self.shadow_horizon` without per-object raymarching loops.
+    pub fn recompute_horizon_shadows(&mut self, sun_slope: f32) {
+        let w = self.config.width;
+        let h = self.config.height;
+        let count = w * h;
+        if self.elevation.len() != count {
+            self.elevation.resize(count, 0.0);
+        }
+        if self.shadow_horizon.len() != count {
+            self.shadow_horizon.resize(count, 0.0);
+        }
+
+        // Sweep from North-East (top-right) toward South-West (-X, +Y) strictly along the diagonal sun ray
+        for y in 0..h {
+            for x in (0..w).rev() {
+                let idx = y * w + x;
+                let base_h = self.elevation[idx];
+                let mut horizon = base_h;
+                if y > 0 && x + 1 < w {
+                    let up_sun_h = self.shadow_horizon[(y - 1) * w + (x + 1)] - sun_slope;
+                    if up_sun_h > horizon {
+                        horizon = up_sun_h;
+                    }
+                }
+                self.shadow_horizon[idx] = horizon;
+            }
+        }
+    }
+
+    /// Bilinearly sample shadow depth `max(0, h_shadow - h)` at continuous coordinate `(wx, wy)`.
+    #[inline]
+    pub fn shadow_depth_at(&self, wx: f32, wy: f32) -> f32 {
+        let w = self.config.width;
+        let h = self.config.height;
+        if self.shadow_horizon.len() != w * h || self.elevation.len() != w * h {
+            return 0.0;
+        }
+        let x0 = (wx.floor() as isize).clamp(0, w as isize - 1) as usize;
+        let y0 = (wy.floor() as isize).clamp(0, h as isize - 1) as usize;
+        let x1 = (x0 + 1).min(w - 1);
+        let y1 = (y0 + 1).min(h - 1);
+        let fx = (wx - x0 as f32).clamp(0.0, 1.0);
+        let fy = (wy - y0 as f32).clamp(0.0, 1.0);
+
+        let depth = |ix: usize, iy: usize| -> f32 {
+            let i = iy * w + ix;
+            (self.shadow_horizon[i] - self.elevation[i]).max(0.0)
+        };
+        let d0 = depth(x0, y0) * (1.0 - fx) + depth(x1, y0) * fx;
+        let d1 = depth(x0, y1) * (1.0 - fx) + depth(x1, y1) * fx;
+        d0 * (1.0 - fy) + d1 * fy
     }
 }

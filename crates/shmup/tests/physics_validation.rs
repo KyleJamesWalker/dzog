@@ -2,12 +2,18 @@
 pub mod autopilot;
 #[path = "../src/canyon.rs"]
 pub mod canyon;
+#[path = "../src/combat.rs"]
+pub mod combat;
 #[path = "../src/entities.rs"]
 pub mod entities;
 #[path = "../src/field_game.rs"]
 pub mod field_game;
+#[path = "../src/render/mod.rs"]
+pub mod render;
+#[path = "../src/spawning.rs"]
+pub mod spawning;
 
-use entities::ShmupEvent;
+use entities::{AlienRole, GroundTargetKind, ShmupEvent};
 use field_game::ShmupFieldGame;
 
 #[test]
@@ -125,4 +131,129 @@ fn test_chladni_swarm_and_wasd_soliton_cannons_field_coupling() {
     game.score += 999;
     assert!(game.restore_branch_checkpoint());
     assert_eq!(game.score, saved_score);
+}
+
+#[test]
+fn test_progressive_enemy_fracturing_and_ground_waveguide_chain_detonation() {
+    let mut game = ShmupFieldGame::new(240, 150);
+
+    // 1. Locate the TwinGunship medium-large enemy and test progressive fracturing on repeated hits
+    let gunship_idx = game
+        .aliens
+        .iter()
+        .position(|a| a.role == AlienRole::TwinGunship)
+        .expect("Wave must spawn a TwinGunship");
+    game.aliens[gunship_idx].hull.x = 120.0;
+    game.aliens[gunship_idx].hull.y = 45.0;
+
+    let gx = game.aliens[gunship_idx].hull.x;
+    let gy = game.aliens[gunship_idx].hull.y;
+    let coh_initial = game.aliens[gunship_idx].hull.mean_cohesion();
+
+    // Strike 1 on intact armor: carves initial fracture waveguides without full cleavage
+    let (cleave1, prior_cracks1) = game.aliens[gunship_idx]
+        .hull
+        .inflict_progressive_fracture(gx - 2.5, gy, 0.0, -1.0, 1.35, None);
+    let coh_after_hit1 = game.aliens[gunship_idx].hull.mean_cohesion();
+    assert!(!cleave1, "First standard hit on intact gunship should fracture, not cleave");
+    assert_eq!(prior_cracks1, 0);
+    assert!(coh_after_hit1 < coh_initial);
+
+    // Strike 2 on the same fracture zone: detects existing cracks and amplifies fracture network
+    let (_cleave2, prior_cracks2) = game.aliens[gunship_idx]
+        .hull
+        .inflict_progressive_fracture(gx - 2.5, gy, 0.0, -1.0, 1.35, None);
+    let coh_after_hit2 = game.aliens[gunship_idx].hull.mean_cohesion();
+    assert!(
+        prior_cracks2 >= 1,
+        "Second strike on fractured zone must detect existing cracks"
+    );
+    assert!(
+        coh_after_hit2 < coh_after_hit1,
+        "Repeated strikes on fractures must progressively erode hull cohesion"
+    );
+
+    // Strike 3 on the deepened fracture: triggers full topological cleavage
+    let (cleave3, prior_cracks3) = game.aliens[gunship_idx]
+        .hull
+        .inflict_progressive_fracture(gx - 2.5, gy, 0.0, -1.0, 1.45, None);
+    assert!(cleave3 || prior_cracks3 >= 4);
+
+    // 2. Test Alt-Fire Air-to-Ground Missiles (`fire_air_to_ground_missiles`):
+    //    Missiles pass underneath sky enemies and detonate Ground GeodesicFuelDome -> ScorchedCrater + Pipeline Chain Surge
+    let dome_idx = game
+        .ground_targets
+        .iter()
+        .position(|g| g.kind == GroundTargetKind::GeodesicFuelDome)
+        .expect("Wave must spawn a GeodesicFuelDome");
+    let pipe_grp = game.ground_targets[dome_idx].pipeline_group;
+    let dx = 52.0;
+    let dy = 60.0;
+    game.ground_targets[dome_idx].hull.x = dx;
+    game.ground_targets[dome_idx].hull.y = dy;
+
+    for gt in &mut game.ground_targets {
+        if gt.hull.y < 0.0 {
+            gt.hull.y = 55.0;
+        }
+    }
+
+    // Position player below the dome and fire Alt-Fire Air-to-Ground Missiles
+    game.player_hull.x = dx + 3.5;
+    game.player_hull.y = dy + 4.0;
+    game.bolts.clear();
+    game.fire_air_to_ground_missiles();
+    assert_eq!(
+        game.bolts.len(),
+        2,
+        "Alt-fire must launch twin finned Air-to-Ground Missiles"
+    );
+
+    game.step();
+
+    assert!(
+        !game.craters.is_empty() && !game.grounded_wreckage.is_empty(),
+        "Air-to-Ground Missile impact on a ground dome must stamp a ScorchedCrater and GroundedWreckage rubble"
+    );
+    assert!(
+        game.credits >= 800,
+        "Destroying ground infrastructure must award Raptor bounty credits ($)"
+    );
+    assert!(
+        game.chain_detonations >= 1,
+        "Detonating a pipeline-coupled dome (group {}) must surge connected ground targets",
+        pipe_grp
+    );
+
+    // 3. Verify kinetic-force bullet impacts impart angular torque (`omega`) and knockback to enemies
+    let g_idx = game
+        .aliens
+        .iter()
+        .position(|a| a.role == AlienRole::TwinGunship)
+        .expect("TwinGunship must still be present");
+    let gx = game.aliens[g_idx].hull.x;
+    let gy = game.aliens[g_idx].hull.y;
+    game.bolts.push(entities::SolitonBolt {
+        x: gx + 3.2,
+        y: gy + 1.0,
+        vx: 0.0,
+        vy: -2.0,
+        radius: 1.8,
+        ttl: 20,
+        from_player: true,
+        overcharged: false,
+        kind: entities::ProjectileKind::KineticBullet,
+    });
+    game.step();
+    assert!(
+        game.aliens[g_idx].hull.omega.abs() > 0.005,
+        "Off-center kinetic projectile bullet must impart rotational torque (omega) to enemy hull"
+    );
+
+    // Verify 2.5D sub-cell (4x = 960x540) VGA renderer + side gauges run cleanly
+    game.render_to_pixel_buffer();
+    assert_eq!(
+        game.pixel_buffer.len(),
+        game.render_width() * game.render_height() * 4
+    );
 }

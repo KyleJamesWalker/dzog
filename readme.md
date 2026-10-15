@@ -42,13 +42,9 @@ cargo run -p asteroids
 cargo run -p asteroids -- --autopilot
 cargo run -p asteroids -- --autopilot --record asteroids_demo.mp4 --duration 30
 
-# Launch the Solid-State & Quantum-Vacuum Breakout demo
-cargo run -p pong
-
 # Run headless WGPU zero-readback & FDTD benchmarks
 cargo run -p shmup -- --bench
 cargo run -p asteroids -- --bench
-cargo run -p pong -- --bench
 ```
 
 ### Builds and web demos
@@ -113,7 +109,6 @@ Running continuum PDEs at $60\text{–}120\text{ Hz}$ inside an interactive game
 | [`crates/dzog-bevy`](./crates/dzog-bevy) | Bevy engine plugin (`DzogBevyPlugin`): nearest-neighbor field canvas presentation (`FieldImageHandle`), shared perceptual view modes (`FieldViewMode`), mandatory hardware WGPU compute accelerator (`GpuFieldAccelerator`), and native `bevy_audio` (`Decodable` / `DzogFieldAudioSource`) streaming. |
 | [`crates/shmup`](./crates/shmup) | **Crystalline Corridor (Bohm-Hiley Chladni Swarm & Annealing Shmup)**: 4-way planar thruster Tri-Lobe crystal ship (3 structural lobes instead of integer HP), Chladni standing-wave alien swarm formations (`ChladniCarrierEmitter`), contested Annealing Piezo Power-Cubes ($\Delta C > 0$ regrowing severed lobes), and scrolling metamaterial canyon walls. |
 | [`asteroids`](./asteroids) | **Field-First Crystalline Asteroids & Alien Ecology** (`240×150` lattice, `1600×1000` window): Multi-tier 3D-faceted mineralogical asteroids (`PiezoQuartz`, `ObsidianAnvil`, `BismuthCrystal`), dynamic field-lit crystal facets ($\nabla L, \nabla p$), continuous soliton laser glow, tactical piezo chain-cleaving, `BohmianSaucer` corvette & `HarmonicWeaver` cruiser craft, autopilot (`[T]` / `--autopilot`), and MP4 session recording (`--record`). |
-| [`pong`](./pong) | **Solid-State & Quantum-Vacuum Breakout**: Crystalline phonon coupling, point-of-impact cleavage planes, sympathetic crystal domino cascades, Paddle Doppler Overcharge, coherent Phase-Pulse wave-casting, and counterfactual checkpoint branching. |
 
 ### GPU Compute Pipeline (`dzog-wgpu`)
 

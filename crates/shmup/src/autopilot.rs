@@ -20,17 +20,11 @@ impl ShmupFieldGame {
         let sx = self.player_hull.x;
         let sy = self.player_hull.y;
 
-        // 1. Parry incoming enemy bolts or pull nearby Power Cubes with Antiphase Attractor
+        // 1. Parry incoming enemy bolts only at very close range (avoids unnecessary shield rings around player)
         let incoming_bolt = self.bolts.iter().any(|b| {
-            !b.from_player && (b.x - sx).powi(2) + (b.y - sy).powi(2) <= 110.0
+            !b.from_player && (b.x - sx).powi(2) + (b.y - sy).powi(2) <= 36.0
         });
-        let close_cube = self.power_cubes.iter().any(|c| {
-            let d2 = (c.body.x - sx).powi(2) + (c.body.y - sy).powi(2);
-            d2 > 36.0 && d2 < 900.0
-        });
-        if (incoming_bolt || (self.player_intact_lobes() < 3 && close_cube && t % 45 == 0))
-            && self.shield_visual_timer == 0
-        {
+        if incoming_bolt && self.shield_visual_timer == 0 {
             self.trigger_antiphase_attractor();
         }
 
@@ -70,14 +64,29 @@ impl ShmupFieldGame {
                 let dy = (cube.body.y + 2.0) - sy;
                 self.thrust_planar(dx.clamp(-1.0, 1.0), dy.clamp(-0.8, 0.8));
             } else {
-                // 4. Align horizontally under the nearest visible Chladni Alien or Asteroid
-                let target_x = self
-                    .aliens
-                    .iter()
-                    .find(|a| a.hull.y > 0.0)
-                    .map(|a| a.hull.x)
-                    .or_else(|| self.asteroids.iter().find(|r| r.y > 0.0).map(|r| r.x))
-                    .unwrap_or(self.width as f32 * 0.5);
+                // 4. Sweep across both sky squadrons (`TwinGunship`, `ChladniMatriarch`) and ground domes
+                let focus_ground = (t / 90) % 2 == 1;
+                let target_x = if focus_ground {
+                    self.ground_targets
+                        .iter()
+                        .find(|g| g.hull.y > 16.0 && g.hull.y < sy - 10.0)
+                        .map(|g| g.hull.x)
+                } else {
+                    None
+                }
+                .or_else(|| {
+                    self.aliens
+                        .iter()
+                        .find(|a| a.hull.y > 14.0)
+                        .map(|a| a.hull.x)
+                })
+                .or_else(|| {
+                    self.ground_targets
+                        .iter()
+                        .find(|g| g.hull.y > 10.0)
+                        .map(|g| g.hull.x)
+                })
+                .unwrap_or(self.width as f32 * 0.5);
                 let desired_y = self.height as f32 * 0.80 + (t as f32 * 0.04).sin() * 5.0;
                 let (lw, rw, _) = canyon_wall_bounds(
                     (sy.round() as usize).clamp(0, self.height - 1),
@@ -94,10 +103,13 @@ impl ShmupFieldGame {
             }
         }
 
-        // 5. Fire fast upward soliton bursts at measured cadence (every 15 ticks)
-        if t % 15 == 0 {
-            let overcharge = self.capacitor >= 36.0 && (t % 30 == 0);
+        // 5. Fire kinetic-force projectile bullets every 14 ticks & Air-to-Ground Missiles every 34 ticks
+        if t % 14 == 0 {
+            let overcharge = self.capacitor >= 42.0 && (t % 42 == 0);
             self.fire_soliton_cannons(overcharge);
+        }
+        if t % 34 == 8 && self.ground_targets.iter().any(|g| g.hull.y > 10.0) {
+            self.fire_air_to_ground_missiles();
         }
     }
 }

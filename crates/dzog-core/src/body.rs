@@ -374,6 +374,116 @@ impl CohesiveBody {
         body
     }
 
+    /// Generate a heavy twin-nacelle strike gunship hull (central bridge + port/starboard engine pods).
+    ///
+    /// Designed for multi-stage progressive fracturing: concentrated fire on a lateral nacelle or
+    /// wing strut cleaves that pod off via BFS while the surviving core continues flying.
+    pub fn new_twin_gunship(id: u32, x: f32, y: f32, outer_radius: f32) -> Self {
+        let local_size = ((outer_radius * 2.4).ceil() as usize).clamp(12, 24);
+        let count = local_size * local_size;
+        let mut occupied = vec![false; count];
+        let mut cohesion = vec![0.0f32; count];
+        let center = (local_size as f32 - 1.0) * 0.5;
+
+        for ly in 0..local_size {
+            for lx in 0..local_size {
+                let dx = lx as f32 - center;
+                let dy = ly as f32 - center;
+                // Forward axis is +X in local space (when theta = FRAC_PI_2, +X points downward +Y)
+                let in_fuselage = dx >= -outer_radius * 0.78
+                    && dx <= outer_radius * 0.92
+                    && dy.abs() <= outer_radius * 0.26;
+                let in_strut = dx >= -outer_radius * 0.32
+                    && dx <= outer_radius * 0.36
+                    && dy.abs() > outer_radius * 0.26
+                    && dy.abs() <= outer_radius * 0.46;
+                let in_nacelle = dx >= -outer_radius * 0.82
+                    && dx <= outer_radius * 0.78
+                    && dy.abs() > outer_radius * 0.46
+                    && dy.abs() <= outer_radius * 0.94;
+
+                if in_fuselage || in_strut || in_nacelle {
+                    let idx = ly * local_size + lx;
+                    occupied[idx] = true;
+                    cohesion[idx] = if in_strut { 0.84 } else { 0.98 };
+                }
+            }
+        }
+
+        let mut body = Self {
+            id,
+            x,
+            y,
+            vx: 0.0,
+            vy: 0.0,
+            theta: 0.0,
+            omega: 0.0,
+            local_size,
+            occupied,
+            cohesion,
+            material: BodyMaterialSpec::for_class(MineralClass::BismuthCrystal),
+            mass: 1.0,
+            inertia: 1.0,
+            radius: outer_radius,
+            last_fracture_step: None,
+        };
+        body.recompute_mass_properties();
+        body
+    }
+
+    /// Generate a faceted geodesic ground dome or biodome reactor structure.
+    pub fn new_geodesic_dome(
+        id: u32,
+        x: f32,
+        y: f32,
+        radius: f32,
+        class: MineralClass,
+    ) -> Self {
+        let local_size = ((radius * 2.3).ceil() as usize).clamp(10, 24);
+        let count = local_size * local_size;
+        let mut occupied = vec![false; count];
+        let mut cohesion = vec![0.0f32; count];
+        let center = (local_size as f32 - 1.0) * 0.5;
+
+        for ly in 0..local_size {
+            for lx in 0..local_size {
+                let dx = lx as f32 - center;
+                let dy = ly as f32 - center;
+                let r = (dx * dx + dy * dy).sqrt();
+                // Octagonal / geodesic outer envelope
+                let oct_r = (dx.abs().max(dy.abs()) * 0.72 + r * 0.32).max(0.01);
+                if r <= radius && oct_r <= radius * 0.98 {
+                    let idx = ly * local_size + lx;
+                    occupied[idx] = true;
+                    let on_rib = (dx.abs() - dy.abs()).abs() < 0.75
+                        || dx.abs() < 0.65
+                        || dy.abs() < 0.65;
+                    cohesion[idx] = if on_rib { 0.90 } else { 0.98 };
+                }
+            }
+        }
+
+        let mut body = Self {
+            id,
+            x,
+            y,
+            vx: 0.0,
+            vy: 0.0,
+            theta: 0.0,
+            omega: 0.0,
+            local_size,
+            occupied,
+            cohesion,
+            material: BodyMaterialSpec::for_class(class),
+            mass: 1.0,
+            inertia: 1.0,
+            radius,
+            last_fracture_step: None,
+        };
+        body.recompute_mass_properties();
+        body
+    }
+
     /// Inspect structural integrity of a Tri-Lobe hull: `(port_wing_intact, core_intact, starboard_wing_intact)`.
     pub fn trilobe_status(&self) -> (bool, bool, bool) {
         let center = (self.local_size as f32 - 1.0) * 0.5;
@@ -965,6 +1075,145 @@ impl CohesiveBody {
         }
 
         full_cleave
+    }
+
+    /// Progressive multi-stage fracture propagation for medium and large hulls & structures.
+    ///
+    /// - Initial strikes on intact armor carve localized glowing fissures (`C in 0.22..0.38`) without
+    ///   instantly severing the hull.
+    /// - Subsequent strikes hitting near existing fractures (`C < 0.68`) amplify fracture growth:
+    ///   eroding existing cracks toward cavitation (`C -> 0.0`), extending fracture length, and
+    ///   branching secondary cleavage seams until the section topologically cleaves via BFS.
+    /// - Returns `(triggered_full_cleave, existing_fractured_cells_hit)`.
+    pub fn inflict_progressive_fracture(
+        &mut self,
+        wx: f32,
+        wy: f32,
+        dir_x: f32,
+        dir_y: f32,
+        energy: f32,
+        periodic_dims: Option<(f32, f32)>,
+    ) -> (bool, usize) {
+        let (lx_raw, ly_raw) = self.world_to_local(wx, wy, periodic_dims);
+        let n_f = (self.local_size.saturating_sub(1)) as f32;
+        let lx = lx_raw.clamp(0.0, n_f);
+        let ly = ly_raw.clamp(0.0, n_f);
+
+        let cos_t = self.theta.cos();
+        let sin_t = self.theta.sin();
+        let l_dx = dir_x * cos_t + dir_y * sin_t;
+        let l_dy = -dir_x * sin_t + dir_y * cos_t;
+        let base_angle = l_dy.atan2(l_dx);
+
+        // Count existing fractured cells near the impact site and sympathetically deepen them
+        let mut nearby_cracked = 0usize;
+        for ny in 0..self.local_size {
+            for nx in 0..self.local_size {
+                let idx = ny * self.local_size + nx;
+                if !self.occupied[idx] {
+                    continue;
+                }
+                let d2 = (nx as f32 - lx).powi(2) + (ny as f32 - ly).powi(2);
+                if d2 <= 12.25 && self.cohesion[idx] < 0.68 {
+                    nearby_cracked += 1;
+                    // Hitting an existing fracture erodes surrounding cracked cells further
+                    let erode = (0.20 * energy * (1.0 - (d2.sqrt() / 3.8).min(0.85))).max(0.06);
+                    self.cohesion[idx] = (self.cohesion[idx] - erode).max(0.0);
+                }
+            }
+        }
+
+        let mean_c = self.mean_cohesion();
+        let stage = if energy >= 2.05 || nearby_cracked >= 4 || mean_c < 0.72 {
+            3 // Full through-cleave stage
+        } else if nearby_cracked >= 1 || mean_c < 0.86 {
+            2 // Branched deep fracture stage
+        } else {
+            1 // Initial surface & waveguide crack stage
+        };
+
+        let crater_r = match stage {
+            1 => 0.85,
+            2 => 1.15,
+            _ => 1.45,
+        };
+        let crater_coh = match stage {
+            1 => 0.30,
+            2 => 0.10,
+            _ => 0.0,
+        };
+        for ny in 0..self.local_size {
+            for nx in 0..self.local_size {
+                let idx = ny * self.local_size + nx;
+                if !self.occupied[idx] {
+                    continue;
+                }
+                let dist = ((nx as f32 - lx).powi(2) + (ny as f32 - ly).powi(2)).sqrt();
+                if dist <= crater_r {
+                    self.cohesion[idx] = self.cohesion[idx].min(crater_coh);
+                }
+            }
+        }
+
+        let branches: &[(f32, f32, f32)] = match stage {
+            1 => &[
+                (0.0, 0.32, 0.52),
+                (0.48, 0.38, 0.36),
+                (-0.48, 0.38, 0.36),
+            ],
+            2 => &[
+                (0.0, 0.08, 0.85),
+                (std::f32::consts::PI, 0.16, 0.65),
+                (0.55, 0.22, 0.60),
+                (-0.55, 0.22, 0.60),
+            ],
+            _ => &[
+                (0.0, 0.0, 1.40),
+                (std::f32::consts::PI, 0.0, 1.40),
+                (0.58, 0.0, 1.10),
+                (-0.58, 0.08, 0.90),
+            ],
+        };
+
+        let full_cleave = stage >= 3;
+        for &(ang_off, target_coh, len_frac) in branches {
+            let ang = base_angle + ang_off;
+            let vx = ang.cos();
+            let vy = ang.sin();
+            let perp_x = -vy;
+            let perp_y = vx;
+            let max_steps = ((self.local_size as f32 * len_frac * 1.6) as usize).max(4);
+            let widths: &[f32] = if full_cleave && target_coh == 0.0 {
+                &[-0.55, 0.0, 0.55]
+            } else if stage >= 2 {
+                &[-0.35, 0.35]
+            } else {
+                &[0.0]
+            };
+
+            for step in 0..max_steps {
+                let t = step as f32 * 0.45;
+                let px = lx + vx * t;
+                let py = ly + vy * t;
+                for &w_off in widths {
+                    let ix = (px + perp_x * w_off).round() as isize;
+                    let iy = (py + perp_y * w_off).round() as isize;
+                    if ix >= 0
+                        && ix < self.local_size as isize
+                        && iy >= 0
+                        && iy < self.local_size as isize
+                    {
+                        let idx = (iy as usize) * self.local_size + (ix as usize);
+                        if self.occupied[idx] {
+                            self.cohesion[idx] = self.cohesion[idx].min(target_coh);
+                        }
+                    }
+                }
+            }
+        }
+
+        self.recompute_mass_properties();
+        (full_cleave, nearby_cracked)
     }
 
     /// Run 4-connected Breadth-First Search (BFS) over intact/waveguide cells (`C >= 0.15`).

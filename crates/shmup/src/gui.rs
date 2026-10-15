@@ -5,7 +5,9 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use bevy::{
     audio::{AudioSink, AudioSinkPlayback},
+    input::gamepad::{Gamepad, GamepadButton},
     prelude::*,
+    window::{MonitorSelection, PrimaryWindow, WindowMode},
 };
 use dzog_bevy::{
     spawn_field_canvas_and_audio, DzogBevyPlugin, DzogFieldAudioSource, FieldImageHandle,
@@ -65,13 +67,13 @@ impl Mp4VideoRecorder {
                 "-pix_fmt",
                 "yuv420p",
                 "-preset",
-                "medium",
+                "fast",
                 "-crf",
-                "26",
+                "21",
                 "-maxrate",
-                "600k",
+                "4000k",
                 "-bufsize",
-                "1200k",
+                "8000k",
                 &temp_video_path,
             ])
             .stdin(Stdio::piped())
@@ -130,8 +132,8 @@ impl Mp4VideoRecorder {
         let samples_per_frame = (FieldModalSynthesizer::DEFAULT_SAMPLE_RATE as usize) / 60;
         for _ in 0..samples_per_frame {
             let (l, r) = self.synth.next_stereo_frame();
-            self.audio_left.push(l);
-            self.audio_right.push(r);
+            self.audio_left.push((l * 0.80).tanh());
+            self.audio_right.push((r * 0.80).tanh());
         }
 
         self.frames_written += 1;
@@ -194,6 +196,7 @@ pub struct ShmupStateResource {
     pub game: ShmupFieldGame,
     pub paused: bool,
     pub fire_cooldown: u8,
+    pub fps_ema: f32,
     pub recorder: Option<Mp4VideoRecorder>,
 }
 
@@ -251,29 +254,42 @@ fn parse_cli_options() -> (bool, Option<(String, u32)>) {
 
 pub fn launch_gui() {
     let (autopilot, record_cfg) = parse_cli_options();
-    let mut game = ShmupFieldGame::new(240, 150);
+    let mut game = ShmupFieldGame::new(
+        ShmupFieldGame::DEFAULT_WIDTH,
+        ShmupFieldGame::DEFAULT_HEIGHT,
+    );
     game.autopilot_enabled = autopilot;
 
     let shared_audio_for_rec = game.shared_audio_frame.clone();
     let recorder = record_cfg.and_then(|(path, secs)| {
-        let scale = 5usize;
+        let scale = 2usize; // 960x540 * 2 = 1920x1080 (Full HD 1080p)
+        let rw = game.render_width();
+        let rh = game.render_height();
         println!(
             "Recording Crystalline Corridor session to '{}' ({}x{} + 48kHz AAC audio) for {}s...",
             path,
-            game.width * scale,
-            game.height * scale,
+            rw * scale,
+            rh * scale,
             secs
         );
-        Mp4VideoRecorder::new(path, game.width, game.height, scale, secs, shared_audio_for_rec)
+        Mp4VideoRecorder::new(path, rw, rh, scale, secs, shared_audio_for_rec)
             .map_err(|e| eprintln!("{e}"))
             .ok()
     });
 
+    let start_windowed = std::env::args().any(|a| a == "--windowed");
+    let window_mode = if start_windowed {
+        WindowMode::Windowed
+    } else {
+        WindowMode::BorderlessFullscreen(MonitorSelection::Primary)
+    };
+
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
-                title: "Dzog — Crystalline Corridor (Bohm-Hiley Chladni Swarm & Annealing Shmup)".into(),
-                resolution: (1600_u32, 1000_u32).into(),
+                title: "Dzog — Shmup".into(),
+                resolution: (1920_u32, 1080_u32).into(),
+                mode: window_mode,
                 canvas: Some("#dzog".into()),
                 ..default()
             }),
@@ -284,10 +300,14 @@ pub fn launch_gui() {
             game,
             paused: false,
             fire_cooldown: 0,
+            fps_ema: 60.0,
             recorder,
         })
         .add_systems(Startup, setup_scene)
-        .add_systems(Update, (handle_input, step_simulation, update_ui))
+        .add_systems(
+            Update,
+            (handle_input, step_simulation, fit_canvas_to_window, update_ui),
+        )
         .run();
 }
 
@@ -298,8 +318,8 @@ fn setup_scene(
     mut game_res: ResMut<ShmupStateResource>,
 ) {
     game_res.game.render_to_pixel_buffer();
-    let w = game_res.game.width as u32;
-    let h = game_res.game.height as u32;
+    let w = game_res.game.render_width() as u32;
+    let h = game_res.game.render_height() as u32;
     let shared_audio = if std::env::args().any(|a| a == "--mute") || game_res.recorder.is_some() {
         None
     } else {
@@ -313,8 +333,8 @@ fn setup_scene(
         w,
         h,
         &game_res.game.pixel_buffer,
-        Vec2::new(1520.0, 900.0),
-        -28.0,
+        Vec2::new(1920.0, 1000.0),
+        -40.0,
         shared_audio,
     );
 
@@ -356,16 +376,82 @@ fn setup_scene(
 fn handle_input(
     keys: Res<ButtonInput<KeyCode>>,
     mouse_buttons: Res<ButtonInput<MouseButton>>,
+    gamepads: Query<&Gamepad>,
+    mut windows: Query<&mut Window, With<PrimaryWindow>>,
     mut game_res: ResMut<ShmupStateResource>,
     audio_sinks: Query<&AudioSink>,
 ) {
-    if keys.just_pressed(KeyCode::KeyP) {
+    if keys.just_pressed(KeyCode::Escape) || keys.just_pressed(KeyCode::KeyQ) {
+        std::process::exit(0);
+    }
+    if keys.just_pressed(KeyCode::F11) {
+        if let Ok(mut win) = windows.single_mut() {
+            win.mode = match win.mode {
+                WindowMode::Windowed => WindowMode::BorderlessFullscreen(MonitorSelection::Primary),
+                _ => WindowMode::Windowed,
+            };
+        }
+    }
+
+    let mut pad_pause = false;
+    let mut pad_view = false;
+    let mut pad_dx = 0.0f32;
+    let mut pad_dy = 0.0f32;
+    let mut pad_fire = false;
+    let mut pad_alt_missile = false;
+    let mut pad_shield = false;
+
+    // Automatically aggregate input from any connected Gamepad / Controller
+    for gamepad in &gamepads {
+        if gamepad.just_pressed(GamepadButton::Start) {
+            pad_pause = true;
+        }
+        if gamepad.just_pressed(GamepadButton::Select) {
+            pad_view = true;
+        }
+        let stick = gamepad.left_stick();
+        if stick.length() > 0.15 {
+            pad_dx += stick.x;
+            pad_dy -= stick.y; // Gamepad +Y is stick up -> screen -Y
+        }
+        if gamepad.pressed(GamepadButton::DPadLeft) {
+            pad_dx -= 1.0;
+        }
+        if gamepad.pressed(GamepadButton::DPadRight) {
+            pad_dx += 1.0;
+        }
+        if gamepad.pressed(GamepadButton::DPadUp) {
+            pad_dy -= 1.0;
+        }
+        if gamepad.pressed(GamepadButton::DPadDown) {
+            pad_dy += 1.0;
+        }
+        if gamepad.pressed(GamepadButton::South)
+            || gamepad.pressed(GamepadButton::RightTrigger2)
+            || gamepad.pressed(GamepadButton::RightTrigger)
+        {
+            pad_fire = true;
+        }
+        if gamepad.just_pressed(GamepadButton::West)
+            || gamepad.just_pressed(GamepadButton::East)
+            || gamepad.just_pressed(GamepadButton::LeftTrigger2)
+        {
+            pad_alt_missile = true;
+        }
+        if gamepad.just_pressed(GamepadButton::North)
+            || gamepad.just_pressed(GamepadButton::LeftTrigger)
+        {
+            pad_shield = true;
+        }
+    }
+
+    if keys.just_pressed(KeyCode::KeyP) || pad_pause {
         game_res.paused = !game_res.paused;
     }
     if keys.just_pressed(KeyCode::KeyR) {
         game_res.game.reset();
     }
-    if keys.just_pressed(KeyCode::KeyV) {
+    if keys.just_pressed(KeyCode::KeyV) || pad_view {
         game_res.game.view_mode = game_res.game.view_mode.next();
     }
     if keys.just_pressed(KeyCode::KeyT) {
@@ -387,9 +473,9 @@ fn handle_input(
         return;
     }
 
-    // 4-Way WASD / Arrow Keys reaction thruster control (W/Up = -Y toward top of screen)
-    let mut dx = 0.0f32;
-    let mut dy = 0.0f32;
+    // 4-Way WASD / Arrow Keys / Gamepad Left Stick & D-Pad reaction thruster control
+    let mut dx = pad_dx;
+    let mut dy = pad_dy;
     if keys.pressed(KeyCode::KeyA) || keys.pressed(KeyCode::ArrowLeft) {
         dx -= 1.0;
     }
@@ -409,6 +495,7 @@ fn handle_input(
     if keys.just_pressed(KeyCode::ShiftLeft)
         || keys.just_pressed(KeyCode::ShiftRight)
         || mouse_buttons.just_pressed(MouseButton::Right)
+        || pad_shield
     {
         game_res.game.trigger_antiphase_attractor();
     }
@@ -416,13 +503,43 @@ fn handle_input(
     if game_res.fire_cooldown > 0 {
         game_res.fire_cooldown -= 1;
     }
-    let fire_pressed = keys.pressed(KeyCode::Space)
-        || mouse_buttons.pressed(MouseButton::Left)
-        || keys.just_pressed(KeyCode::KeyE);
+    let alt_missile_pressed = keys.just_pressed(KeyCode::KeyE)
+        || mouse_buttons.just_pressed(MouseButton::Middle)
+        || pad_alt_missile;
+    if alt_missile_pressed {
+        game_res.game.fire_air_to_ground_missiles();
+    }
+
+    let fire_pressed =
+        keys.pressed(KeyCode::Space) || mouse_buttons.pressed(MouseButton::Left) || pad_fire;
     if fire_pressed && game_res.fire_cooldown == 0 {
-        let overcharge = keys.pressed(KeyCode::KeyE);
-        game_res.game.fire_soliton_cannons(overcharge);
-        game_res.fire_cooldown = 14;
+        game_res.game.fire_soliton_cannons(false);
+        game_res.fire_cooldown = 9;
+    }
+}
+
+/// Dynamically upscale the 16:9 (1080p-native `960x540`) field canvas to fit 1080p, 1440p, or 4K fullscreen windows.
+fn fit_canvas_to_window(
+    windows: Query<&Window, With<PrimaryWindow>>,
+    mut sprites: Query<(&mut Sprite, &mut Transform)>,
+) {
+    let Ok(win) = windows.single() else {
+        return;
+    };
+    let hud_h = 80.0f32;
+    let avail_w = win.width().max(640.0);
+    let avail_h = (win.height() - hud_h).max(360.0);
+    let target_aspect = 16.0 / 9.0;
+
+    let (disp_w, disp_h) = if avail_w / avail_h > target_aspect {
+        (avail_h * target_aspect, avail_h)
+    } else {
+        (avail_w, avail_w / target_aspect)
+    };
+
+    for (mut sprite, mut transform) in &mut sprites {
+        sprite.custom_size = Some(Vec2::new(disp_w, disp_h));
+        transform.translation.y = -hud_h * 0.5;
     }
 }
 
@@ -458,13 +575,22 @@ fn step_simulation(
 }
 
 fn update_ui(
-    game_res: Res<ShmupStateResource>,
+    time: Res<Time>,
+    mut game_res: ResMut<ShmupStateResource>,
+    gamepads: Query<&Gamepad>,
     audio_sinks: Query<&AudioSink>,
     mut top_q: Query<&mut Text, (With<HudTopText>, Without<HudBottomText>)>,
     mut bot_q: Query<&mut Text, (With<HudBottomText>, Without<HudTopText>)>,
 ) {
+    let dt = time.delta_secs();
+    if dt > 0.0001 {
+        let inst_fps = (1.0 / dt).clamp(1.0, 240.0);
+        game_res.fps_ema = game_res.fps_ema * 0.90 + inst_fps * 0.10;
+    }
+    let fps = game_res.fps_ema;
     let g = &game_res.game;
     let ap_status = if g.autopilot_enabled { "ON" } else { "OFF" };
+    let pad_status = if !gamepads.is_empty() { "ON" } else { "AUTO" };
     let (p_ok, c_ok, s_ok) = g.player_hull.trilobe_status();
     let lobes_str = format!(
         "[{}{}{}] ({}/3)",
@@ -475,16 +601,24 @@ fn update_ui(
     );
 
     if let Ok(mut top) = top_q.single_mut() {
+        let alert = if g.player_intact_lobes() < 3 || g.player_hull.mean_cohesion() < 0.70 {
+            " | !! SHIELDS LOW !!"
+        } else if g.pipeline_flash_timer > 0 {
+            " | >> PIPELINE CHAIN DETONATION <<"
+        } else {
+            ""
+        };
         **top = format!(
-            "WAVE {} | SCORE {:05} | HULL LOBES {} | COHESION {:3.0}% | CUBES {} (HEALED P:{}/A:{}) | SWARM {}",
+            "FPS {:3.0} | ${:08} | WAVE {} | HULL {} ({:3.0}%) | SKY {} | GROUND {} | CLEAVES {}{}",
+            fps,
+            g.credits,
             g.wave_number,
-            g.score,
             lobes_str,
             g.player_hull.mean_cohesion() * 100.0,
-            g.power_cubes.len(),
-            g.cubes_collected_player,
-            g.cubes_collected_aliens,
             g.aliens.len(),
+            g.ground_targets.len(),
+            g.topological_cleaves,
+            alert,
         );
     }
 
@@ -494,7 +628,8 @@ fn update_ui(
             _ => "MUTE",
         };
         **bot = format!(
-            "[WASD/Arrows] 4-Way Thrust [Space/E] Soliton/Overcharge [Shift] Antiphase Attractor [T] Auto:{} [V] {} [B/U] Branch [R] Reset [N] Audio:{}",
+            "[WASD/Pad:{}] Thrust [Space/RT] Bullets [E/X] Air-Ground Missiles [Shift/LB] Shield [F11] Fullscreen [T] Auto:{} [V] {} [Q/Esc] Quit [N] Audio:{}",
+            pad_status,
             ap_status,
             g.view_mode.label(),
             audio_status,
