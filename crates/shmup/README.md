@@ -90,32 +90,41 @@ cargo test -p shmup
 
 ## Generating Custom Enemies & Ground Buildings (`tools/flux-forge`)
 
-The standalone CLI tool [`tools/flux-forge/flux_forge.py`](../../tools/flux-forge/flux_forge.py) conditions [`black-forest-labs/FLUX.2-klein-4B`](https://huggingface.co/black-forest-labs/FLUX.2-klein-4B) on `CohesiveBody` silhouettes and bakes:
+The standalone CLI tool [`tools/flux-forge/flux_forge.py`](../../tools/flux-forge/flux_forge.py) conditions [`black-forest-labs/flux-3-image-klein`](https://huggingface.co/black-forest-labs/flux-3-image-klein) (defaulting to the 8-bit SDNQ quantization [`OzzyGT/Flux_3_Image_Klein_sdnq_dynamic_8bit`](https://huggingface.co/OzzyGT/Flux_3_Image_Klein_sdnq_dynamic_8bit) for 16 GB RTX 4080 cards, or `--quant int4` for 8–12 GB GPUs) on `CohesiveBody` silhouettes and bakes:
 - `*_vga.png`: 5-bit VGA palette-quantized sprite with a 1px dark charcoal keyline.
+- `*_vga.bin`: Raw RGBA 48×48 binary file (`9,216` bytes) for zero-dependency compile-time `include_bytes!` embedding in `crates/shmup/src/render/ships.rs`.
 - `*_height_normal.png`: 4-channel `(nx, ny, nz, elevation_h)` height and surface-normal map for 2.5D horizon shadows and 3D falling-wreckage roof deflection.
 - `*_constitutive.json`: Local cohesion seam map (`C_0 = 0.84` along dark armor panel joints) so hulls fracture along their visual seams.
+
+### Ship Creation & Rendering Integration Workflow
+When adding or updating ship sprites:
+1. **Export silhouette mask**: Run `export-masks` to extract the `CohesiveBody` geometry mask into `tools/flux-forge/masks/<entity>_mask.png`.
+2. **Generate with FLUX 3**: Run `flux_forge.py generate` (with prompt specifying pure solid `#000000` background and `Zero exhaust plumes` to keep the trailing edge crisp for thruster particles).
+3. **Embed in renderer**: `flux_forge.py` creates `<entity>_vga.bin`. In `crates/shmup/src/render/ships.rs`, load it via `include_bytes!("../../assets/<entity>_vga.bin")` and sample texels in the rasterizer loop, mapping normalized body coordinates `(nx, ny)` to sprite coordinates `(tx, ty)`.
 
 ```bash
 # Export conditioning masks, VGA sprites, height/normal maps & seam JSONs (no GPU required)
 python3 tools/flux-forge/flux_forge.py export-masks --out-dir tools/flux-forge/masks --vga-size 48
 
-# Generate a new enemy ship with FLUX.2 [klein] 4B (4 steps on CUDA)
+# Generate a new enemy ship with FLUX 3 Image Klein INT8 (16 flow-map steps on 16 GB RTX 4080)
 python3 tools/flux-forge/flux_forge.py generate \
+  --quant int8 \
   --entity heavy_bomber \
   --mask tools/flux-forge/masks/twin_gunship_mask.png \
-  --prompt "1994 MS-DOS VGA pixel art top-down heavy twin-boom stealth bomber sprite, dark slate armor, dual orange plasma bays, 1px dark keyline, solid black background" \
+  --prompt "Convert the entire reference silhouette into a 1994 MS-DOS VGA pixel-art top-down heavy twin-boom stealth bomber sprite in the style of Raptor: Call of the Shadows, dark slate armor, dual orange plasma bays, 1px dark keyline, solid black background." \
   --vga-size 48 \
   --out-dir crates/shmup/assets
 
-# Generate a new ground building with automatic height/normal & seam maps
+# Generate a new ground building with automatic height/normal & seam maps (use --quant int4 on 8-12 GB GPUs)
 python3 tools/flux-forge/flux_forge.py generate \
+  --quant int8 \
   --entity radar_bunker \
   --mask tools/flux-forge/masks/geodesic_dome_mask.png \
-  --prompt "1994 MS-DOS VGA pixel art top-down armored concrete radar bunker building, rotating dish, steel rivets, top-left lighting, solid black background" \
+  --prompt "Convert the entire reference silhouette into a 1994 MS-DOS VGA pixel-art top-down armored concrete radar bunker building in the style of Raptor: Call of the Shadows, rotating dish, steel rivets, top-left lighting, solid black background." \
   --vga-size 48 \
   --out-dir crates/shmup/assets
 
-# Quantize any existing PNG into a 48x48 VGA sprite + constitutive seam map
+# Quantize any existing PNG into a 48x48 VGA sprite + binary + constitutive seam map
 python3 tools/flux-forge/flux_forge.py quantize \
   --input my_sprite.png \
   --output crates/shmup/assets/my_sprite_vga.png \

@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
 """
-dzog-flux-forge: Standalone CLI tool for conditioning `black-forest-labs/FLUX.2-klein-4B`
-on Dzog `CohesiveBody` structural silhouettes to generate sharp 1994 VGA (*Raptor: Call of the Shadows*
+dzog-flux-forge: Standalone CLI tool for conditioning `black-forest-labs/flux-3-image-klein`
+(and its 8-bit/4-bit SDNQ quantizations for <=16 GB GPUs such as the RTX 4080) on Dzog
+`CohesiveBody` structural silhouettes to generate sharp 1994 VGA (*Raptor: Call of the Shadows*
 style) sprite atlases and inverse constitutive material maps (Albedo + Normal/Elevation + Cleavage Seams).
 
 Usage examples:
   # 1. Export deterministic CohesiveBody conditioning masks (no GPU/torch required)
   python3 tools/flux-forge/flux_forge.py export-masks --out-dir tools/flux-forge/masks
 
-  # 2. Generate VGA retro sprites using local FLUX.2 [klein] 4B (4-step rectified flow on CUDA)
-  python3 tools/flux-forge/flux_forge.py generate --masks-dir tools/flux-forge/masks --out-dir crates/shmup/assets
+  # 2. Generate VGA retro sprites using FLUX 3 Image Klein INT8 SDNQ (16-step flow-map on 16 GB RTX 4080)
+  python3 tools/flux-forge/flux_forge.py generate --quant int8 --masks-dir tools/flux-forge/masks --out-dir crates/shmup/assets
 
-  # 3. Post-process any sprite into VGA 256-color palette + 1px keyline + RON constitutive seam map
+  # 3. Purge any cached legacy FLUX.2 weights from HuggingFace caches
+  python3 tools/flux-forge/flux_forge.py purge-old
+
+  # 4. Post-process any sprite into VGA 256-color palette + 1px keyline + RON constitutive seam map
   python3 tools/flux-forge/flux_forge.py quantize --input sprite.png --output vga_sprite.png
 """
 
@@ -21,6 +25,7 @@ import argparse
 import json
 import math
 import os
+import shutil
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -30,48 +35,82 @@ except ImportError:
     Image = None  # Handled gracefully with clear CLI instructions
 
 
+FLUX3_QUANTS: Dict[str, str] = {
+    "int8": "OzzyGT/Flux_3_Image_Klein_sdnq_dynamic_8bit",
+    "int4": "OzzyGT/Flux_3_Image_Klein_sdnq_dynamic_4bit",
+    "bf16": "black-forest-labs/flux-3-image-klein",
+}
+
+LEGACY_FLUX2_PATTERNS: Tuple[str, ...] = (
+    "models--black-forest-labs--FLUX.2*",
+    "models--*flux-2*",
+    "models--*flux2*",
+)
+
+
 ENTITY_SPECS: Dict[str, Dict[str, str]] = {
     "player_raptor": {
         "title": "Tri-Lobe Raptor Interceptor",
         "prompt": (
-            "1994 MS-DOS VGA pixel art top-down military sci-fi fighter jet sprite, "
-            "Raptor Call of the Shadows style, brushed titanium fuselage, crimson red swept wing stripes, "
-            "dark smoked glass cockpit canopy, twin aft thruster nozzles, crisp 1px dark keyline, "
-            "sharp pixel edges, isolated on solid black background, orthographic top-down view"
+            "A premium neo-retro arcade top-down military sci-fi fighter aircraft sprite, inspired by Raptor: Call "
+            "of the Shadows and Strikers 1945. Orthographic straight top-down view centered on solid pure black background "
+            "(#000000). The hull is constructed from faceted titanium-gunmetal composite armor with crisp beveled facets, "
+            "recessed dark cleavage panel grooves, and exposed brass/copper intake cooling vents. Swept triangular delta "
+            "wings with bold crimson-red recognition chevrons, forward-facing dual autocannon muzzles integrated flush "
+            "into the wing roots, and an amber-tinted polarized glass bubble cockpit canopy with illuminated holographic "
+            "flight avionics. Clean, cold thruster nozzles at the rear with no exhaust flame. Strong top-left directional "
+            "lighting casting sharp metallic specular highlights and deep contrasting shadows across panel lines. "
+            "Crisp, razor-sharp pixel edges with a solid dark charcoal 1px perimeter outline. Zero exhaust plumes, "
+            "zero background artifacts, isolated craft."
         ),
     },
     "twin_gunship": {
         "title": "Twin-Nacelle Heavy Strike Gunship",
         "prompt": (
-            "1994 MS-DOS VGA pixel art top-down heavy twin-fuselage enemy gunship sprite, "
-            "Raptor Call of the Shadows style, dark gunmetal armor plates, ribbed engine intakes, "
-            "dual forward orange plasma cannons, industrial rivets, crisp 1px dark outline, "
-            "isolated on solid black background, orthographic top-down view"
+            "Convert the entire reference silhouette into a 1994 MS-DOS VGA pixel-art top-down heavy twin-fuselage "
+            "strike gunship sprite in the style of Raptor: Call of the Shadows. Centered in an orthographic top-down "
+            "view on a solid pure black background, the vessel has two parallel armored engine nacelles flanking a "
+            "recessed central command pod connected by heavy wingbox struts. The hull is clad in weathered dark "
+            "gunmetal steel plates with industrial rivets, ribbed forward air intakes, dual glowing orange plasma "
+            "cannon barrels on the nose, and recessed charcoal structural cleavage seams. Lit from the top-left with "
+            "stepped 5-bit VGA specular highlights and a crisp 1-pixel dark keyline; keep the exact twin-nacelle "
+            "silhouette and solid black background."
         ),
     },
     "chladni_matriarch": {
         "title": "Chladni Swarm Carrier Cruiser",
         "prompt": (
-            "1994 MS-DOS VGA pixel art top-down alien command cruiser ship sprite, "
-            "Raptor Call of the Shadows style, bronze and dark violet armored hull, twin forward "
-            "tuning-fork resonance mandibles, glowing cyan energy core, sharp pixel art, "
-            "isolated on solid black background, orthographic top-down view"
+            "Convert the entire reference silhouette into a 1994 MS-DOS VGA pixel-art top-down alien command "
+            "cruiser sprite in the style of Raptor: Call of the Shadows. Centered in an orthographic top-down view "
+            "against a solid pure black background, the biomechanical hull has a broad elliptical upper carapace in "
+            "burnished bronze and deep violet armor plates, with twin forward tuning-fork resonance mandibles "
+            "extending downward around a glowing cyan acoustic core. Deep charcoal panel grooves trace the structural "
+            "lobes under crisp top-left directional pixel lighting with a 1-pixel dark outline; preserve the exact "
+            "mandible and carapace silhouette on a solid black background."
         ),
     },
     "geodesic_dome": {
         "title": "Geodesic Fuel Dome",
         "prompt": (
-            "1994 MS-DOS VGA pixel art top-down spherical geodesic industrial storage dome building, "
-            "Raptor Call of the Shadows style, triangulated steel truss grid, four cardinal pipe flanges, "
-            "strong top-left directional lighting, crisp pixel art on solid black background"
+            "Convert the entire reference silhouette into a 1994 MS-DOS VGA pixel-art top-down spherical geodesic "
+            "industrial fuel storage dome building in the style of Raptor: Call of the Shadows. Centered in an "
+            "orthographic top-down view on a solid pure black background, the hemispherical steel dome is divided by "
+            "a triangulated dark charcoal truss grid and bolted armor seams, with four cardinal pipeline manifold "
+            "flanges at north, south, east, and west. Strong top-left directional sunlight creates a bright specular "
+            "highlight on the upper-left dome facet and deep shaded lower-right panels with a 1-pixel dark keyline; "
+            "preserve the circular footprint and solid black background."
         ),
     },
     "biodome_reactor": {
         "title": "Biodome Exciton Reactor",
         "prompt": (
-            "1994 MS-DOS VGA pixel art top-down circular glass biodome building, "
-            "Raptor Call of the Shadows style, concrete containment ring, silver cross-hatch glass roof "
-            "over glowing emerald green bioluminescent core, crisp pixel art on solid black background"
+            "Convert the entire reference silhouette into a 1994 MS-DOS VGA pixel-art top-down circular glass "
+            "biodome exciton reactor building in the style of Raptor: Call of the Shadows. Centered in an "
+            "orthographic top-down view on a solid pure black background, a thick octagonal reinforced concrete "
+            "containment collar surrounds a domed silver cross-hatch glass roof glazing over a glowing emerald-green "
+            "bioluminescent crystalline core. Top-left directional lighting casts crisp specular glints across the "
+            "glass struts and dark charcoal structural seams with a 1-pixel dark keyline; keep the exact circular "
+            "silhouette and solid black background."
         ),
     },
 }
@@ -201,11 +240,33 @@ def quantize_to_vga_and_extract_seams(
         for x in range(target_size):
             r, g, b, a = pixels[x, y]
             bright = (0.299 * r + 0.587 * g + 0.114 * b) / 255.0
-            if a > 32 and bright > 0.05:
+            if a > 32 and bright > 0.03:
                 occupied[y][x] = True
                 luma[y][x] = bright
             else:
                 pixels[x, y] = (0, 0, 0, 0)
+
+    # Flood-fill exterior background from image borders so dark interior canopies/seams stay solid
+    exterior = [[False] * target_size for _ in range(target_size)]
+    queue: List[Tuple[int, int]] = []
+    for i in range(target_size):
+        for bx, by in ((i, 0), (i, target_size - 1), (0, i), (target_size - 1, i)):
+            if not occupied[by][bx] and not exterior[by][bx]:
+                exterior[by][bx] = True
+                queue.append((bx, by))
+    while queue:
+        qx, qy = queue.pop()
+        for nx, ny in ((qx - 1, qy), (qx + 1, qy), (qx, qy - 1), (qx, qy + 1)):
+            if 0 <= nx < target_size and 0 <= ny < target_size and not occupied[ny][nx] and not exterior[ny][nx]:
+                exterior[ny][nx] = True
+                queue.append((nx, ny))
+
+    for y in range(target_size):
+        for x in range(target_size):
+            if not exterior[y][x] and not occupied[y][x]:
+                occupied[y][x] = True
+                pixels[x, y] = (24, 32, 44, 255)
+                luma[y][x] = 0.12
 
     cohesion_grid: List[float] = []
     for y in range(target_size):
@@ -340,26 +401,102 @@ def cmd_export_masks(args: argparse.Namespace) -> None:
         )
 
 
+def purge_legacy_flux2_models(verbose: bool = True) -> List[Path]:
+    """Delete any cached legacy FLUX.2 checkpoints from HuggingFace Hub caches and local weights dirs."""
+    search_roots = [
+        Path(os.environ.get("HF_HUB_CACHE", Path.home() / ".cache" / "huggingface" / "hub")),
+        Path(os.environ.get("HF_HOME", Path.home() / ".cache" / "huggingface")) / "hub",
+        Path("/mnt/storage/models/huggingface/hub"),
+        Path("weights"),
+    ]
+    removed: List[Path] = []
+    seen: set[Path] = set()
+    for root in search_roots:
+        if not root.exists():
+            continue
+        for pattern in LEGACY_FLUX2_PATTERNS:
+            for match in root.glob(pattern):
+                resolved = match.resolve()
+                if resolved in seen or not match.exists():
+                    continue
+                seen.add(resolved)
+                if match.is_dir():
+                    shutil.rmtree(match)
+                else:
+                    match.unlink()
+                removed.append(match)
+                if verbose:
+                    print(f"[flux-forge] Deleted legacy FLUX.2 model cache: {match}")
+    return removed
+
+
+def cmd_purge_old(args: argparse.Namespace) -> None:
+    removed = purge_legacy_flux2_models(verbose=True)
+    if not removed:
+        print("[flux-forge] Confirmed clean: no legacy FLUX.2 model caches found on disk.")
+
+
+def resolve_flux3_model_id(model_arg: str | None, quant: str, device: str) -> str:
+    """Resolve the best FLUX 3 Image Klein checkpoint for the target GPU VRAM tier."""
+    if model_arg:
+        if "FLUX.2" in model_arg or "flux-2" in model_arg.lower():
+            raise SystemExit(
+                f"Error: Legacy model '{model_arg}' is deprecated and removed. "
+                f"Use FLUX 3 Image Klein (`--quant int8` -> {FLUX3_QUANTS['int8']})."
+            )
+        return model_arg
+
+    if quant == "auto":
+        if device == "cuda":
+            try:
+                import torch
+
+                vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+                if vram_gb < 14.0:
+                    return FLUX3_QUANTS["int4"]
+                if vram_gb <= 20.0:
+                    return FLUX3_QUANTS["int8"]
+            except Exception:
+                pass
+        return FLUX3_QUANTS["int8"]
+
+    return FLUX3_QUANTS[quant]
+
+
 def cmd_generate(args: argparse.Namespace) -> None:
     require_pillow()
+    purge_legacy_flux2_models(verbose=True)
+
     try:
         import torch
-        from diffusers import Flux2KleinPipeline
+        from diffusers import ModularPipeline
     except ImportError as exc:
         raise SystemExit(
-            f"Missing FLUX.2-klein-4B runtime dependency ({exc}).\n"
+            f"Missing FLUX 3 Image Klein runtime dependency ({exc}).\n"
             "Install with:\n"
-            "  pip install git+https://github.com/huggingface/diffusers.git transformers accelerate torch"
+            "  pip install git+https://github.com/huggingface/diffusers.git sdnq transformers accelerate torch"
         )
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.bfloat16 if device == "cuda" else torch.float32
-    print(f"[flux-forge] Loading {args.model} on {device} ({dtype})...")
-    pipe = Flux2KleinPipeline.from_pretrained(args.model, torch_dtype=dtype)
-    if args.cpu_offload and device == "cuda":
+    model_id = resolve_flux3_model_id(args.model, args.quant, device)
+
+    if "sdnq" in model_id.lower():
+        try:
+            import sdnq  # noqa: F401 — registers dynamic INT8/INT4 quantized weights with Diffusers
+        except ImportError as exc:
+            raise SystemExit(
+                f"Missing `sdnq` package required for quantized FLUX 3 checkpoint '{model_id}' ({exc}).\n"
+                "Install with: pip install 'sdnq>=0.2.8'"
+            )
+
+    print(f"[flux-forge] Loading FLUX 3 Image Klein ({model_id}, quant={args.quant}) on {device} ({dtype})...")
+    pipe = ModularPipeline.from_pretrained(model_id)
+    pipe.load_components(dtype=dtype)
+    if args.cpu_offload and device == "cuda" and hasattr(pipe, "enable_model_cpu_offload"):
         pipe.enable_model_cpu_offload()
     else:
-        pipe = pipe.to(device)
+        pipe.to(device)
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -373,8 +510,11 @@ def cmd_generate(args: argparse.Namespace) -> None:
             {
                 "title": name,
                 "prompt": (
-                    "1994 MS-DOS VGA pixel art top-down sci-fi sprite, brushed gunmetal armor, "
-                    "crisp 1px dark keyline, isolated on solid black background, orthographic top-down view"
+                    "Convert the entire reference silhouette into a 1994 MS-DOS VGA pixel-art top-down sci-fi "
+                    "sprite in the style of Raptor: Call of the Shadows. Centered in an orthographic top-down view "
+                    "on a solid pure black background, clad in brushed gunmetal armor plates with recessed charcoal "
+                    "structural cleavage seams, top-left directional lighting, and a crisp 1-pixel dark keyline; "
+                    "preserve the exact silhouette and solid black background."
                 ),
             },
         )
@@ -389,17 +529,17 @@ def cmd_generate(args: argparse.Namespace) -> None:
             else:
                 mask = Image.open(mask_path).convert("RGB")
 
-        gen = torch.Generator(device=device).manual_seed(args.seed + idx)
-        print(f"[flux-forge] Generating '{name}' ({args.steps} steps)...")
+        gen = torch.Generator().manual_seed(args.seed + idx)
+        print(f"[flux-forge] Generating '{name}' ({args.steps} flow-map steps, model={model_id})...")
         result = pipe(
             image=mask,
             prompt=prompt,
             height=512,
             width=512,
-            guidance_scale=1.0,
             num_inference_steps=args.steps,
             generator=gen,
-        ).images[0]
+            output="images",
+        )[0]
 
         raw_path = out_dir / f"{name}_flux_raw.png"
         result.save(raw_path)
@@ -412,7 +552,16 @@ def cmd_generate(args: argparse.Namespace) -> None:
         vga_img.save(vga_path)
         height_img.save(height_path)
         meta_path.write_text(json.dumps(meta, indent=2))
-        print(f"[flux-forge] Saved {vga_path}, {height_path}, and {meta_path}")
+
+        bin_path = out_dir / f"{name}_vga.bin"
+        bin_bytes = bytearray()
+        rgba_px = vga_img.convert("RGBA").load()
+        for y in range(args.vga_size):
+            for x in range(args.vga_size):
+                bin_bytes.extend(rgba_px[x, y])
+        bin_path.write_bytes(bin_bytes)
+
+        print(f"[flux-forge] Saved {vga_path}, {height_path}, {meta_path}, and {bin_path}")
 
 
 def cmd_quantize(args: argparse.Namespace) -> None:
@@ -421,18 +570,32 @@ def cmd_quantize(args: argparse.Namespace) -> None:
     vga_img, meta = quantize_to_vga_and_extract_seams(src, target_size=args.vga_size)
     out_path = Path(args.output)
     vga_img.save(out_path)
-    meta_path = out_path.with_suffix(".constitutive.json")
+    entity_hint = out_path.stem.replace("_vga", "")
+    height_img = bake_height_and_normal_map(entity_hint, vga_img, target_size=args.vga_size)
+    height_path = out_path.with_name(f"{entity_hint}_height_normal.png")
+    height_img.save(height_path)
+    meta_path = out_path.with_name(f"{entity_hint}_constitutive.json")
     meta_path.write_text(json.dumps(meta, indent=2))
+
+    # Also bake uncompressed RGBA binary for instant zero-dependency include_bytes! embedding
+    bin_path = out_path.with_name(f"{entity_hint}_vga.bin")
+    bin_bytes = bytearray()
+    rgba_px = vga_img.convert("RGBA").load()
+    for y in range(args.vga_size):
+        for x in range(args.vga_size):
+            bin_bytes.extend(rgba_px[x, y])
+    bin_path.write_bytes(bin_bytes)
+
     print(
-        f"[flux-forge] Quantized {args.input} -> {out_path} "
-        f"({args.vga_size}x{args.vga_size}, seam_cells={meta['seam_cells']})"
+        f"[flux-forge] Quantized {args.input} -> {out_path}, {height_path}, {meta_path}, {bin_path} "
+        f"({args.vga_size}x{args.vga_size}, active={meta['active_cells']}, seam_cells={meta['seam_cells']})"
     )
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="flux-forge",
-        description="Dzog FLUX.2 [klein] 4B VGA Sprite & Constitutive Seam Baker",
+        description="Dzog FLUX 3 Image Klein (INT8/INT4 SDNQ & BF16) VGA Sprite & Constitutive Seam Baker",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -443,18 +606,34 @@ def build_parser() -> argparse.ArgumentParser:
     p_mask.add_argument("--vga-size", type=int, default=48, help="Downsampled VGA sprite resolution")
     p_mask.set_defaults(func=cmd_export_masks)
 
-    p_gen = sub.add_parser("generate", help="Run FLUX.2 [klein] 4B 4-step img2img sprite generation")
-    p_gen.add_argument("--model", default="black-forest-labs/FLUX.2-klein-4B")
+    p_gen = sub.add_parser(
+        "generate",
+        help="Run FLUX 3 Image Klein 16-step flow-map img2img sprite generation (defaults to INT8 SDNQ for <=16 GB GPUs)",
+    )
+    p_gen.add_argument(
+        "--quant",
+        default="int8",
+        choices=["int8", "int4", "bf16", "auto"],
+        help="Quantization tier: 'int8' (best for 16 GB RTX 4080, ~12 GB VRAM), 'int4' (<=12 GB GPUs, ~9 GB VRAM), 'bf16' (24 GB+ GPUs)",
+    )
+    p_gen.add_argument(
+        "--model",
+        default=None,
+        help="Optional explicit HuggingFace repo ID override (defaults to --quant selection)",
+    )
     p_gen.add_argument("--masks-dir", default="tools/flux-forge/masks")
     p_gen.add_argument("--out-dir", default="crates/shmup/assets")
     p_gen.add_argument("--entity", default="all", help="Built-in archetype name, 'all', or a custom asset name")
-    p_gen.add_argument("--prompt", default=None, help="Custom prompt override for generating a new enemy or building")
+    p_gen.add_argument("--prompt", default=None, help="Custom scene caption override for generating a new enemy or building")
     p_gen.add_argument("--mask", default=None, help="Optional custom conditioning silhouette PNG path")
-    p_gen.add_argument("--steps", type=int, default=4)
+    p_gen.add_argument("--steps", type=int, default=16, help="Flow-map sampling steps (16 for distilled FLUX 3 Klein)")
     p_gen.add_argument("--seed", type=int, default=42)
     p_gen.add_argument("--vga-size", type=int, default=48)
     p_gen.add_argument("--cpu-offload", action="store_true")
     p_gen.set_defaults(func=cmd_generate)
+
+    p_purge = sub.add_parser("purge-old", help="Delete any cached legacy FLUX.2 checkpoints from disk")
+    p_purge.set_defaults(func=cmd_purge_old)
 
     p_quant = sub.add_parser("quantize", help="Quantize an image to VGA palette + 1px keyline + seam map")
     p_quant.add_argument("--input", required=True)

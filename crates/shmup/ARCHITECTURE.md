@@ -80,15 +80,22 @@ When a ground installation (`GeodesicFuelDome`, `BiodomeReactor`, `FlakTurret`) 
 
 ## 5. Offline Diffusion Conditioning vs. Real-Time Determinism (`tools/flux-forge`)
 
-Running a 4B-parameter rectified-flow transformer inside a $60\text{ Hz}$ ($16.6\text{ ms}$) frame loop violates frame-time budgets, introduces temporal pixel boiling, and smears exact topological cleavage seams.
+Running a 5.6B-parameter flow-map transformer inside a $60\text{ Hz}$ ($16.6\text{ ms}$) frame loop violates frame-time budgets, introduces temporal pixel boiling, and smears exact topological cleavage seams.
 
 **Hybrid Pipeline (`tools/flux-forge/flux_forge.py`)**:
 1. **Orthographic Mask Export (`export-masks`)**: Generates deterministic conditioning silhouettes directly from `CohesiveBody` geometry.
-2. **4-Step Rectified-Flow Conditioning (`generate`)**: Runs `black-forest-labs/FLUX.2-klein-4B` (`bfloat16`) offline/at asset-build time.
+2. **16-Step Flow-Map Conditioning (`generate`)**: Runs [`black-forest-labs/flux-3-image-klein`](https://huggingface.co/black-forest-labs/flux-3-image-klein) via Diffusers `ModularPipeline` offline/at asset-build time, defaulting to 8-bit SDNQ quantization (`OzzyGT/Flux_3_Image_Klein_sdnq_dynamic_8bit`, ~12 GB VRAM on 16 GB RTX 4080) or 4-bit SDNQ (`--quant int4`, ~8.5 GB VRAM on 8–12 GB GPUs).
 3. **VGA Quantization, Seam Extraction & Heightmap Baking (`quantize`, `bake_height_and_normal_map`)**:
    - Quantizes sprites to 5-bit VGA palettes with 1px dark charcoal keylines.
+   - Outputs raw 48×48 RGBA `.bin` files (`9,216` bytes) for direct compile-time `include_bytes!` consumption by `crates/shmup/src/render/ships.rs`.
    - Maps dark armor panel lines into pre-stressed local cohesion values ($C_0 = 0.84$) so hulls physically fracture along their visual seams.
    - Exports 4-channel `(nx, ny, nz, elevation_h)` maps (`*_height_normal.png`) for 2.5D lighting and roof deflection.
+
+### Asset Integration Contract for Ships
+Each ship renderer in `crates/shmup/src/render/ships.rs` projects the `CohesiveBody`'s local coordinate frame onto the sprite atlas:
+- The sub-cell loop iterates over the bounding box of `ship.radius`.
+- Normalized coordinates `(nx, ny) = ((lx - center) / radius, (ly - center) / radius)` map onto `(tx, ty)` in the 48×48 sprite buffer.
+- `a >= 32` pixels render the baked FLUX 3 texture, while procedural fracture cracks (`coh < 0.68`), invulnerability blinks, and field shield glows modulate on top.
 
 ### Example CLI Usage (`tools/flux-forge/flux_forge.py`)
 
@@ -96,26 +103,28 @@ Running a 4B-parameter rectified-flow transformer inside a $60\text{ Hz}$ ($16.6
 # 1. Export all built-in CohesiveBody conditioning masks, VGA sprites, height/normal maps & seam JSONs
 python3 tools/flux-forge/flux_forge.py export-masks --out-dir tools/flux-forge/masks --vga-size 48
 
-# 2. Generate all built-in enemy & building sprites on CUDA using FLUX.2 [klein] 4B (4 steps)
+# 2. Generate all built-in enemy & building sprites on a 16 GB RTX 4080 using FLUX 3 Image Klein INT8 (16 steps)
 python3 tools/flux-forge/flux_forge.py generate \
-  --model black-forest-labs/FLUX.2-klein-4B \
+  --quant int8 \
   --masks-dir tools/flux-forge/masks \
   --out-dir crates/shmup/assets \
-  --steps 4
+  --steps 16
 
-# 3. Generate a new custom enemy ship from a custom prompt and conditioning mask
+# 3. Generate a new custom enemy ship from a custom scene caption and conditioning mask
 python3 tools/flux-forge/flux_forge.py generate \
+  --quant int8 \
   --entity heavy_bomber \
   --mask tools/flux-forge/masks/twin_gunship_mask.png \
-  --prompt "1994 MS-DOS VGA pixel art top-down heavy twin-boom stealth bomber sprite, dark slate armor, dual orange plasma bays, 1px dark keyline, solid black background" \
+  --prompt "Convert the entire reference silhouette into a 1994 MS-DOS VGA pixel-art top-down heavy twin-boom stealth bomber sprite in the style of Raptor: Call of the Shadows, dark slate armor, dual orange plasma bays, 1px dark keyline, solid black background." \
   --vga-size 48 \
   --out-dir crates/shmup/assets
 
 # 4. Generate a new custom ground building (with automatic 4-channel height/normal map + cleavage seams)
 python3 tools/flux-forge/flux_forge.py generate \
+  --quant int8 \
   --entity radar_bunker \
   --mask tools/flux-forge/masks/geodesic_dome_mask.png \
-  --prompt "1994 MS-DOS VGA pixel art top-down armored concrete radar bunker building, rotating dish, steel rivets, top-left lighting, solid black background" \
+  --prompt "Convert the entire reference silhouette into a 1994 MS-DOS VGA pixel-art top-down armored concrete radar bunker building in the style of Raptor: Call of the Shadows, rotating dish, steel rivets, top-left lighting, solid black background." \
   --vga-size 48 \
   --out-dir crates/shmup/assets
 

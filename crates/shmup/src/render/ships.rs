@@ -4,6 +4,10 @@ use dzog_core::CohesiveBody;
 use crate::entities::{AlienRole, AlienVessel};
 use super::{check_subpixel_edge, quantize_vga, write_px};
 
+const PLAYER_RAPTOR_SPRITE_SIZE: usize = 48;
+const PLAYER_RAPTOR_SPRITE_RGBA: &[u8; PLAYER_RAPTOR_SPRITE_SIZE * PLAYER_RAPTOR_SPRITE_SIZE * 4] =
+    include_bytes!("../../assets/player_raptor_vga.bin");
+
 /// Render the player's Tri-Lobe *Raptor* Interceptor at `scale` sub-cell resolution (`~40x40` px).
 pub fn draw_player_raptor_vga(
     pixel_buffer: &mut [u8],
@@ -24,6 +28,7 @@ pub fn draw_player_raptor_vga(
     let sin_t = ship.theta.sin();
     let center = (ship.local_size as f32 - 1.0) * 0.5;
     let inv_r = 1.0 / ship.radius.max(1.0);
+    let tex_dim = PLAYER_RAPTOR_SPRITE_SIZE as f32;
 
     for oy in -r_sub..=r_sub {
         for ox in -r_sub..=r_sub {
@@ -58,49 +63,26 @@ pub fn draw_player_raptor_vga(
 
             let nx = (lx - center) * inv_r;
             let ny = (ly - center) * inv_r;
-            let abs_x = nx.abs();
-            let light = (0.72 - nx * 0.28 - ny * 0.22).clamp(0.35, 1.18);
             let crack = if coh < 0.68 { (0.68 - coh) * 2.5 } else { 0.0 };
 
-            let in_canopy = abs_x < 0.17 * (1.0 - (ny + 0.28).abs() * 1.8).max(0.2)
-                && ny >= -0.58
-                && ny <= -0.04;
-            let stripe_center = -0.02 + (abs_x - 0.32).max(0.0) * 0.52;
-            let in_red_stripe =
-                abs_x >= 0.32 && abs_x <= 0.88 && (ny - stripe_center).abs() <= 0.13;
-            let in_wing_gun = (abs_x - 0.60).abs() < 0.06 && ny < -0.10 && ny >= -0.46;
-            let in_nozzle = (abs_x - 0.18).abs() < 0.09 && ny > 0.48;
-            let is_spine = abs_x < 0.06 && ny >= -0.78 && ny <= 0.48;
-            let is_panel_seam = ((lx * 2.2).floor() as i32 % 5 == 0)
-                || ((ly * 2.2).floor() as i32 % 6 == 0);
+            // Sample corresponding texel from the baked FLUX 3 VGA texture
+            let tx = ((nx * 0.40 + 0.5) * tex_dim).clamp(0.0, tex_dim - 1.0) as usize;
+            let ty = ((ny * 0.40 + 0.5) * tex_dim).clamp(0.0, tex_dim - 1.0) as usize;
+            let tidx = (ty * PLAYER_RAPTOR_SPRITE_SIZE + tx) * 4;
+            let (mut r, mut g, mut b, a) = (
+                PLAYER_RAPTOR_SPRITE_RGBA[tidx] as f32 / 255.0,
+                PLAYER_RAPTOR_SPRITE_RGBA[tidx + 1] as f32 / 255.0,
+                PLAYER_RAPTOR_SPRITE_RGBA[tidx + 2] as f32 / 255.0,
+                PLAYER_RAPTOR_SPRITE_RGBA[tidx + 3],
+            );
 
-            let (mut r, mut g, mut b) = if in_canopy {
-                let glint = nx < -0.02 && ny < -0.25 && ny > -0.46;
-                if glint {
-                    (0.82, 0.96, 1.0)
-                } else {
-                    (0.11 * light, 0.22 * light, 0.36 * light)
-                }
-            } else if in_red_stripe {
-                (0.86 * light, 0.16 * light, 0.18 * light)
-            } else if in_wing_gun {
-                (0.28 * light, 0.32 * light, 0.38 * light)
-            } else if in_nozzle {
-                if ny > 0.62 {
-                    (0.35, 0.85, 1.0)
-                } else {
-                    (0.22, 0.25, 0.30)
-                }
-            } else if is_spine {
-                (0.82 * light, 0.86 * light, 0.92 * light)
-            } else {
-                let seam_mod = if is_panel_seam { -0.08 } else { 0.0 };
-                (
-                    (0.56 + seam_mod) * light,
-                    (0.60 + seam_mod) * light,
-                    (0.66 + seam_mod) * light,
-                )
-            };
+            // If sampled pixel is outside the sprite opaque footprint, fall back to procedural hull shading
+            if a < 32 {
+                let light = (0.72 - nx * 0.28 - ny * 0.22).clamp(0.35, 1.18);
+                r = 0.56 * light;
+                g = 0.60 * light;
+                b = 0.66 * light;
+            }
 
             if invuln_steps % 4 >= 2 {
                 r += 0.18;
